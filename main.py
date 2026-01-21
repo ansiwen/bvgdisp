@@ -1,0 +1,505 @@
+import time
+
+import socket
+import machine
+import network
+import asyncio
+import aiohttp
+import ssl
+import json
+import ntptime
+import hub75
+from picographics import PicoGraphics, DISPLAY_INTERSTATE75_32X32, DISPLAY_INTERSTATE75_64X32, DISPLAY_INTERSTATE75_96X32, DISPLAY_INTERSTATE75_96X48, DISPLAY_INTERSTATE75_128X32, DISPLAY_INTERSTATE75_64X64, DISPLAY_INTERSTATE75_128X64, DISPLAY_INTERSTATE75_192X64, DISPLAY_INTERSTATE75_256X64, DISPLAY_INTERSTATE75_128X128
+from font_bvg import font_small
+from settings import *
+
+rtc = machine.RTC()
+
+# SSL context
+ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+ssl_ctx.verify_mode = ssl.CERT_NONE
+
+
+# Check and import the Network SSID and Password from secrets.py
+# try:
+#     from secrets import WIFI_PASSWORD, WIFI_SSID
+#     if WIFI_SSID == "":
+#         raise ValueError("WIFI_SSID in 'secrets.py' is empty!")
+#     if WIFI_PASSWORD == "":
+#         raise ValueError("WIFI_PASSWORD in 'secrets.py' is empty!")
+# except ImportError:
+#     raise ImportError("'secrets.py' is missing from your Plasma 2350 W!")
+# except ValueError as e:
+#     print(e)
+
+# Enable the Wireless
+network.country("DE")
+network.hostname("BVGdisplay")
+
+wlan = network.WLAN(network.STA_IF)
+
+# Setup for the display
+display = PicoGraphics(display=DISPLAY_INTERSTATE75_128X32)
+
+framebuffer = memoryview(display)
+
+h75 = hub75.Hub75(128, 32, color_order=hub75.COLOR_ORDER_RGB)
+h75.start()
+
+WIDTH, HEIGHT = display.get_bounds()
+
+# Pens
+RED = display.create_pen(120, 0, 0)
+YELLOW = display.create_pen(255, 180, 0)
+BVG = display.create_pen(255, 170, 0)
+#BVG = display.create_pen(255, 228, 36)
+BLACK = display.create_pen(0, 0, 0)
+WHITE = display.create_pen(255, 255, 255)
+
+
+pr_y = 0
+def pr(*args, clear=False):
+    global pr_y
+    display.set_pen(RED)
+    if clear:
+        pr_y=0
+        display.set_pen(BLACK)
+        display.clear()
+        display.set_pen(RED)
+    str_args = [str(arg) for arg in args]
+    s = ' '.join(str_args)
+    print(s)
+    display.text(s, 0, pr_y, scale=1)
+    h75.update(display)
+    pr_y+=6
+
+def network_connect(SSID, PSK):
+    for i in range(6):
+        wlan.disconnect()
+        while wlan.active():
+            wlan.active(False)
+        while not wlan.active():
+            wlan.active(True)
+        # Sets the Wireless LED pulsing and attempts to connect to your local network.
+        pr("connecting to", SSID, "...")       
+        wlan.config(pm=0xa11140)  # Turn WiFi power saving off for some slow APs
+        wlan.connect(SSID, PSK)
+
+        for j in range(10):
+            print("wlan.status:", wlan.status())
+            if wlan.status() < 0 or wlan.status() >= 3:
+                break
+            print('waiting for connection...')
+            time.sleep(1)
+
+        # Handle connection error. Switches the Warn LED on.
+        if wlan.isconnected():
+            print("connected")
+            ip, subnet, gateway, dns = wlan.ifconfig()
+            pr("IP:", ip)
+#            pr("Subnet:", subnet)
+#            pr("Gateway:", gateway)
+#            pr("DNS:", dns)
+            return
+
+        print("wlan.status:", wlan.status())
+        pr("Unable to connect. Retrying.", clear=True)
+        time.sleep(1)
+    pr("Failed to connect. Restarting...")
+    time.sleep(1)
+    machine.reset()
+
+def connectivity_test(host='1.1.1.1', port=80, timeout=60):
+    """Minimal blocking TCP connectivity test. Returns True if connected."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, port))
+        s.close()
+        return True
+    except Exception as e:
+        print(f"Connectivity test failed: {e}")
+        pr("No Internet. Restarting...")
+        time.sleep(1)
+        machine.reset()
+
+def parse_iso_to_epoch(date_str):    
+    # Split off timezone
+    dt_part = date_str[:19]  # "2026-01-04T04:46:00"
+    tz_part = date_str[19:]  # "+01:00"
+    
+    # Parse date and time
+    year = int(dt_part[0:4])
+    month = int(dt_part[5:7])
+    day = int(dt_part[8:10])
+    hour = int(dt_part[11:13])
+    minute = int(dt_part[14:16])
+    second = int(dt_part[17:19])
+    
+    # Parse timezone offset
+    tz_sign = 1 if tz_part[0] == '+' else -1
+    tz_hours = int(tz_part[1:3])
+    tz_mins = int(tz_part[4:6])
+    tz_offset = tz_sign * (tz_hours * 3600 + tz_mins * 60)
+    
+    # Convert to epoch (UTC)
+    # mktime expects: (year, month, day, hour, min, sec, weekday, yearday)
+    timestamp = time.mktime((year, month, day, hour, minute, second, 0, 0))
+    
+    # Adjust for timezone (subtract to convert to UTC)
+    return timestamp - tz_offset
+
+def parse_http_date(date_str):
+    # "Mon, 05 Jan 2026 19:17:30 GMT"
+    import time
+    
+    months = {
+        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+        'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+        'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+    }
+
+    parts = date_str.split()
+    day = int(parts[1])
+    month = months[parts[2]]
+    year = int(parts[3])
+
+    hour, minute, second = map(int, parts[4].split(':'))
+
+    # RTC.datetime() format: (year, month, day, weekday, hours, minutes, seconds, subseconds)
+    timestamp = (year, month, day, 0, hour, minute, second, 0)
+
+    return timestamp
+
+# def text_bold(txt, x, y, scale=1):
+#     for c in txt:
+#         print("printing bold ", c, " at ", x, y)
+#         display.text(c, x, y, scale=scale)
+#         #display.text(c, x+1, y, scale=scale)
+#         x += display.measure_text(c, scale)+2
+        
+# def scroll_x():
+#     fb = memoryview(display)
+#     for y in range(32):
+#         c = 4*WIDTH
+#         x0 = bytes(fb[c*y:c*y+3])
+#         fb[c*y:c*(y+1)-4] = fb[c*y+4:c*(y+1)]
+#         fb[c*(y+1)-4:c*(y+1)-1] = x0
+
+def banner():
+    import pngdec
+    png = pngdec.PNG(display)
+    png.open_file("ansiwen128x64.png")
+    for y in range(33):
+        png.decode(0, 0, source=(0, y, 128, 32))
+        h75.update(display)
+    time.sleep_ms(200)
+    display.set_pen(BLACK)
+    for i in range(10):
+        time.sleep_ms(20)
+        display.clear()
+        h75.update(display)
+        png.decode(0, 0, source=(0, 32, 128, 32))
+        h75.update(display)
+    for i in range(16):
+        time.sleep_ms(10)
+        display.line(0, i, 128, i)
+        display.line(0, 31-i, 128, 31-i)
+        h75.update(display)
+    display.set_pen(WHITE)
+    display.line(0, 16, 128, 16)
+    display.set_pen(BLACK)
+    for i in range(64):
+        time.sleep_ms(3)
+        display.pixel(i, 16)
+        display.pixel(127-i, 16)
+        h75.update(display)
+
+def normalize(a, b, c):
+    max = a
+    if b > max:
+        max = b
+    if c > max:
+        max = c
+    a = a*255//max
+    b = b*255//max
+    c = c*255//max
+    return a, b, c
+
+def typ2col(t, l):
+    c = None
+    if t == "tram":
+        c = (190, 20, 20)
+    elif t == "bus":
+        c = (149, 39, 110)
+    elif t == "suburban":
+        c = (0, 141, 79)
+    elif t == "subway":
+        c = (17, 93, 145)
+        if SUBWAY_COLORS:
+            if l == "U1":
+                c = (125, 173, 76)
+            elif l == "U2":
+                c = (218, 66, 30)
+            elif l == "U3":
+                c = (0, 122, 91)
+            elif l == "U4":
+                c = (240, 215, 34)
+            elif l == "U5" or l == "U55":
+                c = (126, 83, 48)
+            elif l == "U6":
+                c = (140, 109, 171)
+            elif l == "U7":
+                c = (82, 141, 186)
+            elif l == "U8":
+                c = (34, 79, 134)
+            elif l == "U9":
+                c = (243, 121, 29)
+    else:
+        return BVG
+    
+    #return display.create_pen(*normalize(*c))
+    return display.create_pen(*c)
+
+# def measure(s, bold=False):
+#     sum = 0
+#     for char in s:
+#         if bold:
+#             glyph = font_small.get("*"+char)
+#         if not bold or glyph == None:
+#             glyph = font_small.get(char)
+#         if glyph is None:
+#             continue
+#         sum += glyph[0]
+#     return sum
+                
+
+def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=False):
+    cursor_x = x-skip
+    height = font_small["fontheight"]
+    last_col = [False]*(height+2)
+    for char in s:
+        if cursor_x >= clip:
+            # invisible
+            break
+        if bold:
+            glyph = font_small.get("*"+char)
+        if not bold or glyph == None:
+            glyph = font_small.get(char)
+        if glyph is None:
+            continue
+        width = glyph[0]-1
+        if kerning:
+            for row in range(height):
+                if bold:
+                    check = glyph[row+1]>>width and (last_col[row+1])
+                else:
+                    check = glyph[row+1]>>width and (last_col[row] or last_col[row+1] or last_col[row+2])
+                if check:
+                    cursor_x += 1
+                    break
+            last_col = [False]*(height+2)
+        if cursor_x + width <= x:
+            # invisible
+            cursor_x += width
+            continue
+        for row in range(height):
+            byte_val = glyph[row+1]
+            if kerning:
+                last_col[row+1] = byte_val&2 == 2
+            if measure:
+                continue
+            for col in range(width):
+                px = cursor_x + col
+                if px >= clip:
+                    # invisible
+                    break
+                if px < x:
+                    # invisible
+                    continue
+                if byte_val & (0x1 << (width-col)):
+                    display.pixel(px, y + row)
+        # Move cursor for next character
+        cursor_x += width
+        if not kerning:
+            cursor_x += 1
+    return cursor_x - x    
+
+banner()
+
+display.set_pen(RED)
+network_connect(WIFI_SSID, WIFI_PASSWORD)
+connectivity_test()
+
+pr("connected with internet")
+pr("waiting for data...")
+
+shared_data = []
+safe_to_fetch = asyncio.Event()
+safe_to_fetch.set()
+
+display.set_font("bitmap8")
+dest_offset = pprint("M10", bold=True, kerning=True, measure=True)+2
+dest_width = WIDTH-dest_offset-pprint("30'", measure=True)-1
+
+async def display_task():
+    print("display task started")
+    await asyncio.sleep_ms(500)
+    start_ms = 0
+    blink = True
+    print("waiting for first data")
+    while not shared_data:
+        await asyncio.sleep_ms(100)
+    safe_to_fetch.clear()
+    while True:
+        try:
+            last_ms = start_ms
+            start_ms = time.ticks_ms()
+            delta = time.ticks_diff(start_ms, last_ms)
+            if delta > 1050:
+                print("delta:", time.ticks_diff(start_ms, last_ms))
+        
+            data = shared_data.copy()  # Quick shallow copy
+
+            display.set_pen(BLACK)
+            display.clear()
+
+            now = time.time()
+            
+            display.set_pen(BVG)
+
+            y = 0
+            
+            for (line, typ, dest, when) in data:
+                if y >= HEIGHT:
+                    break
+
+                #print("when", when, "now", now)
+                eta_n = (when-now+45)//60
+                if eta_n < 0:
+                    continue
+
+                #print(line, dest, eta_n)
+                if eta_n < 1:
+                    eta_s = ""
+                    #eta_s = str(eta_n) + "'"
+                    if blink:
+                        dest = ""
+                else:
+                    eta_s = str(eta_n) + "'"
+                if COLORED:
+                    display.set_pen(typ2col(typ, line))
+#                display.rectangle(0, y, dest_offset-2, 8)
+#                display.set_pen(BLACK)
+                pprint(line, 0, y, bold=True, kerning=True)
+                display.set_pen(BVG)
+                pprint(dest, dest_offset, y, clip=dest_offset+dest_width, kerning=True)
+                eta_offset = WIDTH - pprint(eta_s, measure=True)+1
+                pprint(eta_s, eta_offset, y)
+                y += 8
+                
+            h75.update(display)
+        except Exception as e:
+            print("Something went wrong:", e)
+            print("last data:", data)
+        #print("---")
+        blink = not blink
+
+        # Signal fetch task: "I'm done, safe to run now"
+        safe_to_fetch.set()           # Wake up fetch task
+        await asyncio.sleep_ms(0)       # Yield to let fetch see signal
+        safe_to_fetch.clear()         # Clear immediately (edge-trigger)
+
+        elapsed_ms = time.ticks_diff(time.ticks_ms(), start_ms)
+        await asyncio.sleep_ms(max(1, 1000 - elapsed_ms))
+
+async def data_fetch_task():
+    """Fetches data every 10 seconds"""
+    global session, shared_data, ssl_ctx
+    print("fetch task started")
+    time_set = False
+    while True:
+        try:
+            await safe_to_fetch.wait()
+#            print("fetching data")
+            params = { "results":"8", "duration":"30", "bus":"true", "tram":"true", "subway":"true" }
+            if time_set:
+                params["when"] = time.time()+WALK_DELAY
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                        f'{API_URL}/stops/{STATION_ID}/departures',
+                        params=params
+                    ) as response:
+                        #print("got response")
+                        if response.status == 200:
+                            date = parse_http_date(response.headers["Date"])
+                            old_t = time.time()
+                            rtc.datetime(date)
+                            if time_set:
+                                diff = time.time() - old_t
+                                if diff < -1 or diff > 1:
+                                    print("time diff:", diff)
+                            
+                            if not time_set:
+                                time_set = True
+                                print("time set")
+                                continue
+
+                            #print("parse json from response")
+                            # Parse JSON from response
+                            resp = await response.json()
+
+                            #print("update shared data")
+                            # Update shared data
+                            if deps := resp.get("departures"):
+                                new_data = []
+                                for dep in deps:
+                                    if not dep.get("when"):
+                                        continue
+                                    
+                                    line = dep["line"]["name"]
+                                    if line in FILTERED:
+                                        continue
+                                    typ = dep["line"]["product"]
+                                    when = parse_iso_to_epoch(dep["when"])
+                                    #dest = dep["destination"]["name"]
+                                    dest = dep["direction"]
+                                    dest = dest.replace(", ", "/")
+                                    if dest.endswith(" [Endstelle]"):
+                                        dest = dest[:-12]
+                                    if dest.endswith(" (Berlin)"):
+                                        dest = dest[:-9]
+                                    
+                                    
+                                    new_data.append((line, typ, dest, when))
+                                    
+                                shared_data = new_data
+                                print("updated data")
+                        else:
+                            print("fetch failed:", response.status)
+                            
+        except Exception as e:
+            import sys
+            print(f"Fetch error: {e}")
+            sys.print_exception(e)
+            ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+
+#        print("fetch finished")
+        await asyncio.sleep(10)
+#        print("waiting for finished display")
+
+# Main entry point
+async def main():
+    from web_server import start_web_server
+
+    fetcher = asyncio.create_task(data_fetch_task())
+    display = asyncio.create_task(display_task())
+
+    # Start web server for settings configuration
+    web_server = await start_web_server(port=80)
+
+    await asyncio.gather(fetcher, display)
+
+# Start the event loop
+asyncio.run(main())
