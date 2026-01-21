@@ -11,7 +11,18 @@ import ntptime
 import hub75
 from picographics import PicoGraphics, DISPLAY_INTERSTATE75_32X32, DISPLAY_INTERSTATE75_64X32, DISPLAY_INTERSTATE75_96X32, DISPLAY_INTERSTATE75_96X48, DISPLAY_INTERSTATE75_128X32, DISPLAY_INTERSTATE75_64X64, DISPLAY_INTERSTATE75_128X64, DISPLAY_INTERSTATE75_192X64, DISPLAY_INTERSTATE75_256X64, DISPLAY_INTERSTATE75_128X128
 from font_bvg import font_small
-from settings import *
+# Load settings from JSON
+with open('/settings.json', 'r') as f:
+    settings = json.load(f)
+
+WIFI_SSID = settings['WIFI_SSID']
+WIFI_PASSWORD = settings['WIFI_PASSWORD']
+API_URL = settings['API_URL']
+FILTERED = settings['FILTERED']
+WALK_DELAY = settings['WALK_DELAY']
+COLORED = settings['COLORED']
+SUBWAY_COLORS = settings['SUBWAY_COLORS']
+STATION_ID = settings['STATION_ID']
 
 rtc = machine.RTC()
 

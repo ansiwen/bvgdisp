@@ -530,74 +530,34 @@ async def handle_client(reader, writer):
 
 
 def read_settings():
-    """Read current settings from settings.py"""
+    """Read current settings from settings.json"""
     try:
-        with open('/settings.py', 'r') as f:
-            content = f.read()
-
-        settings = {}
-        for line in content.split('\n'):
-            line = line.strip()
-            if line.startswith('#') or '=' not in line:
-                continue
-
-            key, value = line.split('=', 1)
-            key = key.strip()
-            value = value.strip()
-
-            # Parse values
-            if value.startswith('"') or value.startswith("'"):
-                # String value
-                settings[key] = value.strip('"\'')
-            elif value.startswith('['):
-                # List value
-                items = value.strip('[]').split(',')
-                settings[key] = [item.strip().strip('"\'') for item in items if item.strip()]
-            elif value.lower() in ('true', 'false'):
-                # Boolean value
-                settings[key] = value.lower() == 'true'
-            elif value.isdigit():
-                # Integer value
-                settings[key] = int(value)
-            else:
-                settings[key] = value
-
-        return settings
+        with open('/settings.json', 'r') as f:
+            return json.load(f)
     except Exception as e:
         print(f"Error reading settings: {e}")
         return {}
 
 
 def write_settings(settings):
-    """Write settings to settings.py"""
-    lines = []
-
+    """Write settings to settings.json"""
     default_url = "https://v6.bvg.transport.rest"
-    # Write settings in specific order
-    lines.append(f'WIFI_SSID = "{settings.get("WIFI_SSID", "")}"')
-    lines.append(f'WIFI_PASSWORD = "{settings.get("WIFI_PASSWORD", "")}"')
-    lines.append(f'API_URL = "{settings.get("API_URL", default_url)}"')
 
-    filtered = settings.get('FILTERED', [])
-    if filtered:
-        filtered_str = ', '.join([f'"{item}"' for item in filtered])
-        lines.append(f'FILTERED = [{filtered_str}]')
-    else:
-        lines.append('FILTERED = []')
+    data = {
+        "WIFI_SSID": settings.get("WIFI_SSID", ""),
+        "WIFI_PASSWORD": settings.get("WIFI_PASSWORD", ""),
+        "API_URL": settings.get("API_URL", default_url),
+        "FILTERED": settings.get("FILTERED", []),
+        "WALK_DELAY": settings.get("WALK_DELAY", 0),
+        "COLORED": settings.get("COLORED", True),
+        "SUBWAY_COLORS": settings.get("SUBWAY_COLORS", True),
+        "STATION_ID": settings.get("STATION_ID", 900100003)
+    }
 
-    walk_delay = settings.get('WALK_DELAY', 0)
-    lines.append(f'WALK_DELAY = {walk_delay}')
+    with open('/settings.json', 'w') as f:
+        json.dump(data, f, separators=(',\n ',': '))
 
-    lines.append(f'COLORED = {settings.get("COLORED", True)}')
-    lines.append(f'SUBWAY_COLORS = {settings.get("SUBWAY_COLORS", True)}')
-    lines.append(f'STATION_ID = {settings.get("STATION_ID", 900100003)}')
-
-    content = '\n'.join(lines) + '\n'
-
-    with open('/settings.py', 'w') as f:
-        f.write(content)
-
-    print("Settings saved to /settings.py")
+    print("Settings saved to /settings.json")
 
 
 async def start_web_server(port=80):
