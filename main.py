@@ -5,7 +5,6 @@ import machine
 import network
 import asyncio
 import aiohttp
-import ssl
 import json
 import ntptime
 import hub75
@@ -362,9 +361,10 @@ async def display_task():
                     display.set_pen(typ2col(typ, line))
 #                display.rectangle(0, y, dest_offset-2, 8)
 #                display.set_pen(BLACK)
-                pprint(line, 0, y, bold=True, kerning=True)
-                display.set_pen(BVG)
                 dest_offset = settings.get('DEST_OFFSET')
+                line_size = pprint(line, 0, y, bold=True, kerning=True, measure=True)
+                pprint(line, dest_offset-line_size-3, y, bold=True, kerning=True)
+                display.set_pen(BVG)
                 dest_width = WIDTH - dest_offset - pprint("30'", measure=True) - 1
                 pprint(dest, dest_offset, y, clip=dest_offset+dest_width, kerning=True)
                 eta_offset = WIDTH - pprint(eta_s, measure=True)+1
@@ -390,7 +390,7 @@ async def display_task():
 
 async def data_fetch_task():
     """Fetches data every 10 seconds"""
-    global session, shared_data, ssl_ctx
+    global shared_data
     print("fetch task started")
     time_set = False
     await asyncio.sleep(5) # give chance to read IP address
