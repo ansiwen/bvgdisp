@@ -214,7 +214,7 @@ def normalize(a, b, c):
 
 def typ2col(t, l):
     c = None
-    if t == "tram":
+    if t == "tram" or t == "regional":
         c = (190, 20, 20)
     elif t == "bus":
         c = (149, 39, 110)
@@ -304,7 +304,7 @@ display.set_pen(RED)
 network_connect(settings.get('WIFI_SSID'), settings.get('WIFI_PASSWORD'))
 connectivity_test()
 
-console("connected with internet")
+console("connected to internet")
 console("waiting for data...")
 
 shared_data = []
