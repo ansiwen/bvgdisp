@@ -312,8 +312,6 @@ safe_to_fetch = asyncio.Event()
 safe_to_fetch.set()
 
 display.set_font("bitmap8")
-dest_offset = pprint("M10", bold=True, kerning=True, measure=True)+2
-dest_width = WIDTH-dest_offset-pprint("30'", measure=True)-1
 
 async def display_task():
     print("display task started")
@@ -366,6 +364,8 @@ async def display_task():
 #                display.set_pen(BLACK)
                 pprint(line, 0, y, bold=True, kerning=True)
                 display.set_pen(BVG)
+                dest_offset = settings.get('DEST_OFFSET')
+                dest_width = WIDTH - dest_offset - pprint("30'", measure=True) - 1
                 pprint(dest, dest_offset, y, clip=dest_offset+dest_width, kerning=True)
                 eta_offset = WIDTH - pprint(eta_s, measure=True)+1
                 pprint(eta_s, eta_offset, y)

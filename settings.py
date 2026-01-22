@@ -10,7 +10,8 @@ DEFAULT_SETTINGS = {
     "WALK_DELAY": 0,
     "COLORED": True,
     "SUBWAY_COLORS": True,
-    "STATION_ID": 900100003
+    "STATION_ID": 900100003,
+    "DEST_OFFSET": 23
 }
 
 _settings = None

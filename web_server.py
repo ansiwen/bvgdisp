@@ -206,6 +206,12 @@ HTML_PAGE = """<!DOCTYPE html>
             </div>
 
             <div class="form-group">
+                <label for="dest-offset">Destination Offset (pixels)</label>
+                <input type="number" id="dest-offset" name="DEST_OFFSET" min="0" step="1" required>
+                <div class="small-text">Horizontal offset where destination text starts</div>
+            </div>
+
+            <div class="form-group">
                 <div class="checkbox-group">
                     <input type="checkbox" id="colored" name="COLORED">
                     <label for="colored">Use Colored Display</label>
@@ -242,6 +248,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 document.getElementById('station-id').value = settings.STATION_ID || '900100003';
                 document.getElementById('selected-station-id').textContent = settings.STATION_ID || 'None';
                 document.getElementById('walk-delay').value = settings.WALK_DELAY || 0;
+                document.getElementById('dest-offset').value = settings.DEST_OFFSET || 20;
                 document.getElementById('colored').checked = settings.COLORED || false;
                 document.getElementById('subway-colors').checked = settings.SUBWAY_COLORS || false;
 
@@ -358,6 +365,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 STATION_ID: parseInt(document.getElementById('station-id').value),
                 FILTERED: filtered,
                 WALK_DELAY: parseInt(document.getElementById('walk-delay').value),
+                DEST_OFFSET: parseInt(document.getElementById('dest-offset').value),
                 COLORED: document.getElementById('colored').checked,
                 SUBWAY_COLORS: document.getElementById('subway-colors').checked
             };
