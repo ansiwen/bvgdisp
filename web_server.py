@@ -1,5 +1,6 @@
 import asyncio
 import json
+import settings
 
 
 HTML_PAGE = """<!DOCTYPE html>
@@ -491,16 +492,16 @@ async def handle_client(reader, writer):
 
         elif path == '/api/settings' and method == 'GET':
             # Read current settings
-            settings = read_settings()
-            await send_response(writer, "200 OK", "application/json", json.dumps(settings))
+            await send_response(writer, "200 OK", "application/json", json.dumps(settings.get()))
 
         elif path == '/api/settings' and method == 'POST':
             # Save settings
             try:
                 new_settings = json.loads(body)
-                write_settings(new_settings)
+                settings.set(new_settings)
                 await send_response(writer, "200 OK", "application/json", '{"status":"ok"}')
             except Exception as e:
+                print("saving settings failed:", e)
                 await send_response(writer, "500 Internal Server Error", "text/plain", str(e))
 
         elif path == '/api/restart' and method == 'POST':
@@ -527,37 +528,6 @@ async def handle_client(reader, writer):
             await writer.wait_closed()
         except:
             pass
-
-
-def read_settings():
-    """Read current settings from settings.json"""
-    try:
-        with open('/settings.json', 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Error reading settings: {e}")
-        return {}
-
-
-def write_settings(settings):
-    """Write settings to settings.json"""
-    default_url = "https://v6.bvg.transport.rest"
-
-    data = {
-        "WIFI_SSID": settings.get("WIFI_SSID", ""),
-        "WIFI_PASSWORD": settings.get("WIFI_PASSWORD", ""),
-        "API_URL": settings.get("API_URL", default_url),
-        "FILTERED": settings.get("FILTERED", []),
-        "WALK_DELAY": settings.get("WALK_DELAY", 0),
-        "COLORED": settings.get("COLORED", True),
-        "SUBWAY_COLORS": settings.get("SUBWAY_COLORS", True),
-        "STATION_ID": settings.get("STATION_ID", 900100003)
-    }
-
-    with open('/settings.json', 'w') as f:
-        json.dump(data, f, separators=(',\n ',': '))
-
-    print("Settings saved to /settings.json")
 
 
 async def start_web_server(port=80):
