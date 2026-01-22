@@ -39,21 +39,21 @@ BLACK = display.create_pen(0, 0, 0)
 WHITE = display.create_pen(255, 255, 255)
 
 
-pr_y = 0
-def pr(*args, clear=False):
-    global pr_y
+console_y = 0
+def console(*args, clear=False):
+    global console_y
     display.set_pen(RED)
     if clear:
-        pr_y=0
+        console_y=0
         display.set_pen(BLACK)
         display.clear()
         display.set_pen(RED)
     str_args = [str(arg) for arg in args]
     s = ' '.join(str_args)
     print(s)
-    display.text(s, 0, pr_y, scale=1)
+    display.text(s, 0, console_y-1, scale=1)
     h75.update(display)
-    pr_y+=6
+    console_y+=6
 
 def network_connect(SSID, PSK):
     for i in range(6):
@@ -63,7 +63,7 @@ def network_connect(SSID, PSK):
         while not wlan.active():
             wlan.active(True)
         # Sets the Wireless LED pulsing and attempts to connect to your local network.
-        pr("connecting to", SSID, "...")       
+        console(f"connecting to {SSID}...", clear=True)
         wlan.config(pm=0xa11140)  # Turn WiFi power saving off for some slow APs
         wlan.connect(SSID, PSK)
 
@@ -78,17 +78,19 @@ def network_connect(SSID, PSK):
         if wlan.isconnected():
             print("connected")
             ip, subnet, gateway, dns = wlan.ifconfig()
-            pr("IP:", ip)
-#            pr("Subnet:", subnet)
-#            pr("Gateway:", gateway)
-#            pr("DNS:", dns)
+            console("IP:", ip)
+#            console("Subnet:", subnet)
+#            console("Gateway:", gateway)
+#            console("DNS:", dns)
             return
 
         print("wlan.status:", wlan.status())
-        pr("Unable to connect. Retrying.", clear=True)
-        time.sleep(1)
-    pr("Failed to connect. Restarting...")
-    time.sleep(1)
+        console("Unable to connect.")
+        console("Retrying...")
+        time.sleep(2)
+    console("Failed to connect.")
+    console("Restarting...")
+    time.sleep(2)
     machine.reset()
 
 def connectivity_test(host='1.1.1.1', port=80, timeout=60):
@@ -100,8 +102,10 @@ def connectivity_test(host='1.1.1.1', port=80, timeout=60):
         s.close()
         return True
     except Exception as e:
+        import sys
         print(f"Connectivity test failed: {e}")
-        pr("No Internet. Restarting...")
+        sys.print_exception(e)
+        console("No Internet. Restarting...")
         time.sleep(1)
         machine.reset()
 
@@ -243,19 +247,6 @@ def typ2col(t, l):
     #return display.create_pen(*normalize(*c))
     return display.create_pen(*c)
 
-# def measure(s, bold=False):
-#     sum = 0
-#     for char in s:
-#         if bold:
-#             glyph = font_small.get("*"+char)
-#         if not bold or glyph == None:
-#             glyph = font_small.get(char)
-#         if glyph is None:
-#             continue
-#         sum += glyph[0]
-#     return sum
-                
-
 def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=False):
     cursor_x = x-skip
     height = font_small["fontheight"]
@@ -313,8 +304,8 @@ display.set_pen(RED)
 network_connect(settings.get('WIFI_SSID'), settings.get('WIFI_PASSWORD'))
 connectivity_test()
 
-pr("connected with internet")
-pr("waiting for data...")
+console("connected with internet")
+console("waiting for data...")
 
 shared_data = []
 safe_to_fetch = asyncio.Event()
@@ -338,7 +329,7 @@ async def display_task():
             last_ms = start_ms
             start_ms = time.ticks_ms()
             delta = time.ticks_diff(start_ms, last_ms)
-            if delta > 1050:
+            if last_ms > 0 and delta > 1050:
                 print("delta:", time.ticks_diff(start_ms, last_ms))
         
             data = shared_data.copy()  # Quick shallow copy
@@ -382,7 +373,9 @@ async def display_task():
                 
             h75.update(display)
         except Exception as e:
-            print("Something went wrong:", e)
+            import sys
+            print(f"Display task failed: {e}")
+            sys.print_exception(e)
             print("last data:", data)
         #print("---")
         blink = not blink
@@ -400,6 +393,7 @@ async def data_fetch_task():
     global session, shared_data, ssl_ctx
     print("fetch task started")
     time_set = False
+    await asyncio.sleep(5) # give chance to read IP address
     while True:
         try:
             await safe_to_fetch.wait()
@@ -462,10 +456,8 @@ async def data_fetch_task():
                             
         except Exception as e:
             import sys
-            print(f"Fetch error: {e}")
+            print(f"Fetch task failed: {e}")
             sys.print_exception(e)
-            ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ssl_ctx.verify_mode = ssl.CERT_NONE
 
 #        print("fetch finished")
         await asyncio.sleep(10)
