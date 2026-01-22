@@ -9,23 +9,12 @@ import ssl
 import json
 import ntptime
 import hub75
-from picographics import PicoGraphics, DISPLAY_INTERSTATE75_32X32, DISPLAY_INTERSTATE75_64X32, DISPLAY_INTERSTATE75_96X32, DISPLAY_INTERSTATE75_96X48, DISPLAY_INTERSTATE75_128X32, DISPLAY_INTERSTATE75_64X64, DISPLAY_INTERSTATE75_128X64, DISPLAY_INTERSTATE75_192X64, DISPLAY_INTERSTATE75_256X64, DISPLAY_INTERSTATE75_128X128
+from picographics import PicoGraphics
 from font_bvg import font_small
 import settings
+import hw_conf
 
 rtc = machine.RTC()
-
-# Check and import the Network SSID and Password from secrets.py
-# try:
-#     from secrets import WIFI_PASSWORD, WIFI_SSID
-#     if WIFI_SSID == "":
-#         raise ValueError("WIFI_SSID in 'secrets.py' is empty!")
-#     if WIFI_PASSWORD == "":
-#         raise ValueError("WIFI_PASSWORD in 'secrets.py' is empty!")
-# except ImportError:
-#     raise ImportError("'secrets.py' is missing from your Plasma 2350 W!")
-# except ValueError as e:
-#     print(e)
 
 # Enable the Wireless
 network.country("DE")
@@ -34,11 +23,9 @@ network.hostname("BVGdisplay")
 wlan = network.WLAN(network.STA_IF)
 
 # Setup for the display
-display = PicoGraphics(display=DISPLAY_INTERSTATE75_128X32)
+display = PicoGraphics(display=hw_conf.DISPLAY)
 
-framebuffer = memoryview(display)
-
-h75 = hub75.Hub75(128, 32, color_order=hub75.COLOR_ORDER_RGB)
+h75 = hub75.Hub75(128, 32, color_order=hw_conf.COLOR_ORDER)
 h75.start()
 
 WIDTH, HEIGHT = display.get_bounds()
