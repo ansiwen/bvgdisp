@@ -11,7 +11,14 @@ DEFAULT_SETTINGS = {
     "COLORED": True,
     "SUBWAY_COLORS": True,
     "STATION_ID": 900100003,
-    "DEST_OFFSET": 23
+    "DEST_OFFSET": 23,
+    "SHOW_BUS": True,
+    "SHOW_TRAM": True,
+    "SHOW_SUBWAY": True,
+    "SHOW_REGIONAL": True,
+    "SHOW_SUBURBAN": True,
+    "SHOW_FERRY": True,
+    "SHOW_EXPRESS": True
 }
 
 _settings = None

@@ -57,6 +57,18 @@ HTML_PAGE = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             gap: 8px;
+            margin-bottom: 8px;
+        }
+        .checkbox-group:last-child {
+            margin-bottom: 0;
+        }
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .checkbox-grid .checkbox-group {
+            margin-bottom: 0;
         }
         input[type="checkbox"] {
             width: 18px;
@@ -212,6 +224,40 @@ HTML_PAGE = """<!DOCTYPE html>
             </div>
 
             <div class="form-group">
+                <label>Transport Types</label>
+                <div class="checkbox-grid">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="show-bus" name="SHOW_BUS">
+                        <label for="show-bus">Bus</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="show-tram" name="SHOW_TRAM">
+                        <label for="show-tram">Tram</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="show-subway" name="SHOW_SUBWAY">
+                        <label for="show-subway">Subway (U-Bahn)</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="show-suburban" name="SHOW_SUBURBAN">
+                        <label for="show-suburban">Suburban (S-Bahn)</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="show-regional" name="SHOW_REGIONAL">
+                        <label for="show-regional">Regional (RE/RB)</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="show-express" name="SHOW_EXPRESS">
+                        <label for="show-express">Express (IC/ICE)</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="show-ferry" name="SHOW_FERRY">
+                        <label for="show-ferry">Ferry</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
                 <div class="checkbox-group">
                     <input type="checkbox" id="colored" name="COLORED">
                     <label for="colored">Use Colored Display</label>
@@ -249,6 +295,13 @@ HTML_PAGE = """<!DOCTYPE html>
                 document.getElementById('selected-station-id').textContent = settings.STATION_ID || 'None';
                 document.getElementById('walk-delay').value = settings.WALK_DELAY || 0;
                 document.getElementById('dest-offset').value = settings.DEST_OFFSET || 20;
+                document.getElementById('show-bus').checked = settings.SHOW_BUS !== false;
+                document.getElementById('show-tram').checked = settings.SHOW_TRAM !== false;
+                document.getElementById('show-subway').checked = settings.SHOW_SUBWAY !== false;
+                document.getElementById('show-regional').checked = settings.SHOW_REGIONAL !== false;
+                document.getElementById('show-suburban').checked = settings.SHOW_SUBURBAN !== false;
+                document.getElementById('show-ferry').checked = settings.SHOW_FERRY !== false;
+                document.getElementById('show-express').checked = settings.SHOW_EXPRESS !== false;
                 document.getElementById('colored').checked = settings.COLORED || false;
                 document.getElementById('subway-colors').checked = settings.SUBWAY_COLORS || false;
 
@@ -366,6 +419,13 @@ HTML_PAGE = """<!DOCTYPE html>
                 FILTERED: filtered,
                 WALK_DELAY: parseInt(document.getElementById('walk-delay').value),
                 DEST_OFFSET: parseInt(document.getElementById('dest-offset').value),
+                SHOW_BUS: document.getElementById('show-bus').checked,
+                SHOW_TRAM: document.getElementById('show-tram').checked,
+                SHOW_SUBWAY: document.getElementById('show-subway').checked,
+                SHOW_REGIONAL: document.getElementById('show-regional').checked,
+                SHOW_SUBURBAN: document.getElementById('show-suburban').checked,
+                SHOW_FERRY: document.getElementById('show-ferry').checked,
+                SHOW_EXPRESS: document.getElementById('show-express').checked,
                 COLORED: document.getElementById('colored').checked,
                 SUBWAY_COLORS: document.getElementById('subway-colors').checked
             };

@@ -398,7 +398,17 @@ async def data_fetch_task():
         try:
             await safe_to_fetch.wait()
 #            print("fetching data")
-            params = { "results":"8", "duration":"30", "bus":"true", "tram":"true", "subway":"true" }
+            params = {
+                "results": "10",
+                "duration": "30",
+                "bus": "true" if settings.get('SHOW_BUS') else "false",
+                "tram": "true" if settings.get('SHOW_TRAM') else "false",
+                "subway": "true" if settings.get('SHOW_SUBWAY') else "false",
+                "regional": "true" if settings.get('SHOW_REGIONAL') else "false",
+                "suburban": "true" if settings.get('SHOW_SUBURBAN') else "false",
+                "ferry": "true" if settings.get('SHOW_FERRY') else "false",
+                "express": "true" if settings.get('SHOW_EXPRESS') else "false"
+            }
             if time_set:
                 params["when"] = time.time()+settings.get('WALK_DELAY')
             async with aiohttp.ClientSession() as session:
