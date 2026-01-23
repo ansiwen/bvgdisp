@@ -460,8 +460,7 @@ async def data_fetch_task():
                                     typ = dep["line"]["product"]
                                     when = parse_iso_to_epoch(dep["when"])
                                     #dest = dep["destination"]["name"]
-                                    dest = dep["direction"]
-                                    dest = dest.replace(", ", "/")
+                                    dest = dep["direction"].split(", ")[-1]
                                     if dest.endswith(" [Endstelle]"):
                                         dest = dest[:-12]
                                     if dest.endswith(" (Berlin)"):
