@@ -24,10 +24,11 @@ wlan = network.WLAN(network.STA_IF)
 # Setup for the display
 display = PicoGraphics(display=hw_conf.DISPLAY)
 
-h75 = hub75.Hub75(128, 32, color_order=hw_conf.COLOR_ORDER)
+WIDTH, HEIGHT = display.get_bounds()
+
+h75 = hub75.Hub75(WIDTH, HEIGHT, color_order=hw_conf.COLOR_ORDER)
 h75.start()
 
-WIDTH, HEIGHT = display.get_bounds()
 
 # Pens
 RED = display.create_pen(120, 0, 0)
@@ -175,8 +176,9 @@ def banner():
     import pngdec
     png = pngdec.PNG(display)
     png.open_file("ansiwen128x64.png")
+    pos_y = HEIGHT//2 - 16
     for y in range(33):
-        png.decode(0, 0, source=(0, y, 128, 32))
+        png.decode(0, pos_y, source=(0, y, 128, 32))
         h75.update(display)
     time.sleep_ms(200)
     display.set_pen(BLACK)
@@ -184,20 +186,21 @@ def banner():
         time.sleep_ms(20)
         display.clear()
         h75.update(display)
-        png.decode(0, 0, source=(0, 32, 128, 32))
+        png.decode(0, pos_y, source=(0, 32, 128, 32))
         h75.update(display)
     for i in range(16):
         time.sleep_ms(10)
-        display.line(0, i, 128, i)
-        display.line(0, 31-i, 128, 31-i)
+        display.line(0, pos_y+i, 128, pos_y+i)
+        display.line(0, pos_y+31-i, 128, pos_y+31-i)
         h75.update(display)
     display.set_pen(WHITE)
-    display.line(0, 16, 128, 16)
+    pos_y += 16
+    display.line(0, pos_y, 128, pos_y)
     display.set_pen(BLACK)
     for i in range(64):
         time.sleep_ms(3)
-        display.pixel(i, 16)
-        display.pixel(127-i, 16)
+        display.pixel(i, pos_y)
+        display.pixel(127-i, pos_y)
         h75.update(display)
 
 def normalize(a, b, c):
@@ -339,9 +342,11 @@ async def display_task():
             display.set_pen(BVG)
 
             y = 0
+            if HEIGHT == 64:
+                y = 1
             
             for (line, typ, dest, when) in data:
-                if y >= HEIGHT:
+                if y >= HEIGHT-8:
                     break
 
                 #print("when", when, "now", now)
@@ -370,6 +375,8 @@ async def display_task():
                 eta_offset = WIDTH - pprint(eta_s, measure=True)+1
                 pprint(eta_s, eta_offset, y)
                 y += 8
+                if HEIGHT == 64:
+                    y += 1
                 
             h75.update(display)
         except Exception as e:
