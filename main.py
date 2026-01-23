@@ -1,5 +1,4 @@
 import time
-
 import socket
 import machine
 import network
@@ -348,7 +347,7 @@ async def display_task():
                 y = 1
             
             for (line, typ, dest, when) in data:
-                if y >= HEIGHT-8:
+                if y > HEIGHT-8:
                     break
 
                 #print("when", when, "now", now)
@@ -497,3 +496,5 @@ async def main():
 
 # Start the event loop
 asyncio.run(main())
+
+machine.reset()
