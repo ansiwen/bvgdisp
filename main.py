@@ -19,6 +19,7 @@ network.country("DE")
 network.hostname("BVGdisplay")
 
 wlan = network.WLAN(network.STA_IF)
+ap_mode = False
 
 # Setup for the display
 display = PicoGraphics(display=hw_conf.DISPLAY)
@@ -54,7 +55,34 @@ def console(*args, clear=False):
     h75.update(display)
     console_y+=6
 
+def start_ap_mode():
+    """Start WiFi Access Point for configuration"""
+    global ap_mode
+    ap_mode = True
+    ap = network.WLAN(network.AP_IF)
+
+
+    # Disable station mode
+    wlan.active(False)
+
+    # Enable AP mode
+    ap.config(essid='BVGdisplay', security=0)  # Open network for easy setup
+    ap.active(True)
+
+    # Wait for AP to be active
+    while not ap.active():
+        time.sleep(0.1)
+
+    ip = ap.ifconfig()[0]
+    console("WiFi Setup Mode", clear=True)
+    console("Connect to WiFi:")
+    console("  BVGdisplay")
+    console(f"Open: http://{ip}")
+    print(f"AP Mode active. IP: {ip}")
+    return ip
+
 def network_connect(SSID, PSK):
+    """Try to connect to WiFi. Returns True on success, False on failure."""
     for i in range(6):
         wlan.disconnect()
         while wlan.active():
@@ -76,21 +104,16 @@ def network_connect(SSID, PSK):
         # Handle connection error. Switches the Warn LED on.
         if wlan.isconnected():
             print("connected")
-            ip, subnet, gateway, dns = wlan.ifconfig()
+            ip = wlan.ifconfig()[0]
             console("IP:", ip)
-#            console("Subnet:", subnet)
-#            console("Gateway:", gateway)
-#            console("DNS:", dns)
-            return
+            return True
 
         print("wlan.status:", wlan.status())
         console("Unable to connect.")
         console("Retrying...")
         time.sleep(2)
     console("Failed to connect.")
-    console("Restarting...")
-    time.sleep(2)
-    machine.reset()
+    return False
 
 def connectivity_test(host='1.1.1.1', port=80, timeout=60):
     """Minimal blocking TCP connectivity test. Returns True if connected."""
@@ -304,11 +327,21 @@ def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=F
 banner()
 
 display.set_pen(RED)
-network_connect(settings.get('WIFI_SSID'), settings.get('WIFI_PASSWORD'))
-connectivity_test()
 
-console("connected to internet")
-console("waiting for data...")
+# Check if WiFi credentials are configured
+ssid = settings.get('WIFI_SSID')
+password = settings.get('WIFI_PASSWORD')
+
+if not ssid or ssid == "REPLACE_WITH_YOUR_SSID":
+    console("No WiFi configured", clear=True)
+    start_ap_mode()
+elif not network_connect(ssid, password):
+    console("Starting AP mode...")
+    start_ap_mode()
+else:
+    connectivity_test()
+    console("connected to internet")
+    console("waiting for data...")
 
 shared_data = []
 safe_to_fetch = asyncio.Event()
@@ -486,13 +519,19 @@ async def data_fetch_task():
 async def main():
     from web_server import start_web_server
 
-    fetcher = asyncio.create_task(data_fetch_task())
-    display = asyncio.create_task(display_task())
-
     # Start web server for settings configuration
-    web_server = asyncio.create_task(start_web_server(port=80))
+    web_server = await start_web_server(port=80)
 
-    await asyncio.gather(fetcher, display, web_server)
+    if ap_mode:
+        # In AP mode, only run the web server for configuration
+        await asyncio.Event().wait() # wait forever
+    else:
+        # Normal mode: run data fetcher and display
+        fetcher = asyncio.create_task(data_fetch_task())
+        display_t = asyncio.create_task(display_task())
+        await asyncio.gather(fetcher, display_t)
+
+    web_server.close()
 
 # Start the event loop
 asyncio.run(main())
