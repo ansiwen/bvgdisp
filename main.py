@@ -250,6 +250,8 @@ def typ2col(t, l):
     return display.create_pen(*c)
 
 def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=False):
+    if not s:
+        return 0
     cursor_x = x-skip
     height = font_small["fontheight"]
     last_col = [False]*(height+2)
@@ -332,7 +334,7 @@ async def display_task():
             if last_ms > 0 and delta > 1050:
                 print("delta:", time.ticks_diff(start_ms, last_ms))
         
-            data = shared_data.copy()  # Quick shallow copy
+            data = shared_data
 
             display.set_pen(BLACK)
             display.clear()
@@ -350,16 +352,18 @@ async def display_task():
                     break
 
                 #print("when", when, "now", now)
-                eta_n = (when-now+45)//60
-                if eta_n < 0:
+                eta_n = (when-now+45)
+                if eta_n < settings.get('WALK_DELAY'):
                     continue
+
+                eta_n //= 60
 
                 #print(line, dest, eta_n)
                 if eta_n < 1:
-                    eta_s = ""
+                    eta_s = None
                     #eta_s = str(eta_n) + "'"
                     if blink:
-                        dest = ""
+                        dest = None
                 else:
                     eta_s = str(eta_n) + "'"
                 if settings.get('COLORED'):
@@ -488,9 +492,9 @@ async def main():
     display = asyncio.create_task(display_task())
 
     # Start web server for settings configuration
-    web_server = await start_web_server(port=80)
+    web_server = asyncio.create_task(start_web_server(port=80))
 
-    await asyncio.gather(fetcher, display)
+    await asyncio.gather(fetcher, display, web_server)
 
 # Start the event loop
 asyncio.run(main())
