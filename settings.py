@@ -19,6 +19,9 @@ DEFAULT_SETTINGS = {
     "SHOW_SUBURBAN": True,
     "SHOW_FERRY": True,
     "SHOW_EXPRESS": True,
+    "NIGHT_START": "22:00",
+    "NIGHT_END": "06:00",
+    "NIGHT_DIMMING": 3,
     "PASSWORD_SALT": "e1b917a40fb57d7ee8feb37a626d7ddd",
     "PASSWORD_HASH": "5ab4742e8e8b4cdd1b9df66879fdad290f09a45e5a8de6ce00d5e72eb4bc8048"
 }

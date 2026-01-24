@@ -30,24 +30,63 @@ h75 = hub75.Hub75(WIDTH, HEIGHT, color_order=hw_conf.COLOR_ORDER)
 h75.start()
 
 
-# Pens
-RED = display.create_pen(120, 0, 0)
-YELLOW = display.create_pen(255, 180, 0)
-BVG = display.create_pen(255, 170, 0)
-#BVG = display.create_pen(255, 228, 36)
-BLACK = display.create_pen(0, 0, 0)
-WHITE = display.create_pen(255, 255, 255)
+# Colors as tuples (R, G, B)
+RED = (120, 0, 0)
+YELLOW = (255, 180, 0)
+BVG = (255, 170, 0)
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+
+def is_night_time():
+    """Check if current time is within night hours"""
+    now = rtc.datetime()
+    current_minutes = now[4] * 60 + now[5]  # hours * 60 + minutes
+
+    start = settings.get('NIGHT_START')
+    end = settings.get('NIGHT_END')
+
+    start_h, start_m = map(int, start.split(':'))
+    end_h, end_m = map(int, end.split(':'))
+
+    start_minutes = start_h * 60 + start_m
+    end_minutes = end_h * 60 + end_m
+
+    if start_minutes <= end_minutes:
+        # Same day range (e.g., 08:00 to 18:00)
+        return start_minutes <= current_minutes < end_minutes
+    else:
+        # Overnight range (e.g., 22:00 to 06:00)
+        return current_minutes >= start_minutes or current_minutes < end_minutes
+
+def get_dimming():
+    """Get current dimming level (0-10), returns 10 if not night time"""
+    dimming = settings.get('NIGHT_DIMMING')
+    if dimming == 10:
+        return 10  # No dimming configured
+    if is_night_time():
+        return dimming  # Apply dimming (0 = off, 1-9 = dimmed)
+    return 10  # Daytime - full brightness
+
+def set_pen(color):
+    """Set pen with dimming applied. Color is (R, G, B) tuple."""
+    dim = get_dimming()
+    if dim == 10:
+        display.set_pen(display.create_pen(*color))
+    else:
+        dimmed = tuple(v * dim // 10 for v in color)
+        display.set_pen(display.create_pen(*dimmed))
 
 
 console_y = 0
 def console(*args, clear=False):
     global console_y
-    display.set_pen(RED)
+    set_pen(RED)
     if clear:
         console_y=0
-        display.set_pen(BLACK)
+        set_pen(BLACK)
         display.clear()
-        display.set_pen(RED)
+        display
+        set_pen(RED)
     str_args = [str(arg) for arg in args]
     s = ' '.join(str_args)
     print(s)
@@ -203,7 +242,7 @@ def banner():
         png.decode(0, pos_y, source=(0, y, 128, 32))
         h75.update(display)
     time.sleep_ms(200)
-    display.set_pen(BLACK)
+    set_pen(BLACK)
     for i in range(10):
         time.sleep_ms(20)
         display.clear()
@@ -215,10 +254,10 @@ def banner():
         display.line(0, pos_y+i, 128, pos_y+i)
         display.line(0, pos_y+31-i, 128, pos_y+31-i)
         h75.update(display)
-    display.set_pen(WHITE)
+    set_pen(WHITE)
     pos_y += 16
     display.line(0, pos_y, 128, pos_y)
-    display.set_pen(BLACK)
+    set_pen(BLACK)
     for i in range(64):
         time.sleep_ms(3)
         display.pixel(i, pos_y)
@@ -237,39 +276,35 @@ def normalize(a, b, c):
     return a, b, c
 
 def typ2col(t, l):
-    c = None
+    """Return color tuple for transport type and line"""
     if t == "tram" or t == "regional":
-        c = (190, 20, 20)
+        return (190, 20, 20)
     elif t == "bus":
-        c = (149, 39, 110)
+        return (149, 39, 110)
     elif t == "suburban":
-        c = (0, 141, 79)
+        return (0, 141, 79)
     elif t == "subway":
-        c = (17, 93, 145)
         if settings.get('SUBWAY_COLORS'):
             if l == "U1":
-                c = (125, 173, 76)
+                return (125, 173, 76)
             elif l == "U2":
-                c = (218, 66, 30)
+                return (218, 66, 30)
             elif l == "U3":
-                c = (0, 122, 91)
+                return (0, 122, 91)
             elif l == "U4":
-                c = (240, 215, 34)
+                return (240, 215, 34)
             elif l == "U5" or l == "U55":
-                c = (126, 83, 48)
+                return (126, 83, 48)
             elif l == "U6":
-                c = (140, 109, 171)
+                return (140, 109, 171)
             elif l == "U7":
-                c = (82, 141, 186)
+                return (82, 141, 186)
             elif l == "U8":
-                c = (34, 79, 134)
+                return (34, 79, 134)
             elif l == "U9":
-                c = (243, 121, 29)
-    else:
-        return BVG
-    
-    #return display.create_pen(*normalize(*c))
-    return display.create_pen(*c)
+                return (243, 121, 29)
+        return (17, 93, 145)
+    return BVG
 
 def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=False):
     if not s:
@@ -329,7 +364,7 @@ def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=F
 
 banner()
 
-display.set_pen(RED)
+set_pen(RED)
 
 # Check if WiFi credentials are configured
 ssid = settings.get('WIFI_SSID')
@@ -371,12 +406,12 @@ async def display_task():
         
             data = shared_data
 
-            display.set_pen(BLACK)
+            set_pen(BLACK)
             display.clear()
 
             now = time.time()
-            
-            display.set_pen(BVG)
+
+            set_pen(BVG)
 
             y = 0
             if HEIGHT == 64:
@@ -402,13 +437,13 @@ async def display_task():
                 else:
                     eta_s = str(eta_n) + "'"
                 if settings.get('COLORED'):
-                    display.set_pen(typ2col(typ, line))
+                    set_pen(typ2col(typ, line))
 #                display.rectangle(0, y, dest_offset-2, 8)
 #                display.set_pen(BLACK)
                 dest_offset = settings.get('DEST_OFFSET')
                 line_size = pprint(line, 0, y, bold=True, kerning=True, measure=True)
                 pprint(line, dest_offset-line_size-3, y, bold=True, kerning=True)
-                display.set_pen(BVG)
+                set_pen(BVG)
                 dest_width = WIDTH - dest_offset - pprint("30'", measure=True) - 1
                 pprint(dest, dest_offset, y, clip=dest_offset+dest_width, kerning=True)
                 eta_offset = WIDTH - pprint(eta_s, measure=True)+1

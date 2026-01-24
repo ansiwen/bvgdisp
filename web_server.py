@@ -167,7 +167,8 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         input[type="text"],
         input[type="password"],
-        input[type="number"] {
+        input[type="number"],
+        input[type="time"] {
             width: 100%;
             padding: 10px;
             border: 1px solid #ddd;
@@ -176,7 +177,8 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         input[type="text"]:focus,
         input[type="password"]:focus,
-        input[type="number"]:focus {
+        input[type="number"]:focus,
+        input[type="time"]:focus {
             outline: none;
             border-color: #4CAF50;
         }
@@ -411,6 +413,21 @@ HTML_PAGE = """<!DOCTYPE html>
                     <label for="dest-offset">Destination Offset (pixels)</label>
                     <input type="number" id="dest-offset" name="DEST_OFFSET" min="0" step="1" required>
                     <div class="small-text">Horizontal offset where destination text starts</div>
+                </div>
+
+                <h2 style="margin-top: 20px;">Night Dimming</h2>
+                <div class="form-group">
+                    <label for="night-start">Night Start</label>
+                    <input type="time" id="night-start" name="NIGHT_START" required>
+                </div>
+                <div class="form-group">
+                    <label for="night-end">Night End</label>
+                    <input type="time" id="night-end" name="NIGHT_END" required>
+                </div>
+                <div class="form-group">
+                    <label for="night-dimming">Dimming Level (0-10)</label>
+                    <input type="number" id="night-dimming" name="NIGHT_DIMMING" min="0" max="10" step="1" required>
+                    <div class="small-text">0 = display off, 10 = no dimming</div>
                 </div>
 
                 <div class="form-group">
@@ -718,6 +735,9 @@ HTML_PAGE = """<!DOCTYPE html>
                 document.getElementById('show-express').checked = settings.SHOW_EXPRESS !== false;
                 document.getElementById('colored').checked = settings.COLORED || false;
                 document.getElementById('subway-colors').checked = settings.SUBWAY_COLORS || false;
+                document.getElementById('night-start').value = settings.NIGHT_START || '22:00';
+                document.getElementById('night-end').value = settings.NIGHT_END || '06:00';
+                document.getElementById('night-dimming').value = settings.NIGHT_DIMMING !== undefined ? settings.NIGHT_DIMMING : 3;
 
                 // Clear and populate filtered lines
                 document.getElementById('filtered-container').innerHTML = '';
@@ -842,7 +862,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 SHOW_FERRY: document.getElementById('show-ferry').checked,
                 SHOW_EXPRESS: document.getElementById('show-express').checked,
                 COLORED: document.getElementById('colored').checked,
-                SUBWAY_COLORS: document.getElementById('subway-colors').checked
+                SUBWAY_COLORS: document.getElementById('subway-colors').checked,
+                NIGHT_START: document.getElementById('night-start').value,
+                NIGHT_END: document.getElementById('night-end').value,
+                NIGHT_DIMMING: parseInt(document.getElementById('night-dimming').value)
             };
 
             try {
