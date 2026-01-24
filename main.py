@@ -40,7 +40,11 @@ WHITE = (255, 255, 255)
 def is_night_time():
     """Check if current time is within night hours"""
     now = rtc.datetime()
-    current_minutes = now[4] * 60 + now[5]  # hours * 60 + minutes
+    # RTC is UTC, apply timezone offset
+    tz_offset = settings.get('TIMEZONE') or 0
+    current_minutes = (now[4] + tz_offset) * 60 + now[5]  # (hours + tz) * 60 + minutes
+    # Normalize to 0-1439 range (24 hours = 1440 minutes)
+    current_minutes = current_minutes % 1440
 
     start = settings.get('NIGHT_START')
     end = settings.get('NIGHT_END')

@@ -19,6 +19,7 @@ DEFAULT_SETTINGS = {
     "SHOW_SUBURBAN": True,
     "SHOW_FERRY": True,
     "SHOW_EXPRESS": True,
+    "TIMEZONE": 1,
     "NIGHT_START": "22:00",
     "NIGHT_END": "06:00",
     "NIGHT_DIMMING": 3,

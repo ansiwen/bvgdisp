@@ -417,6 +417,11 @@ HTML_PAGE = """<!DOCTYPE html>
 
                 <h2 style="margin-top: 20px;">Night Dimming</h2>
                 <div class="form-group">
+                    <label for="timezone">Timezone (UTC offset)</label>
+                    <input type="number" id="timezone" name="TIMEZONE" min="-12" max="14" step="1" required>
+                    <div class="small-text">e.g., 1 for CET, 2 for CEST</div>
+                </div>
+                <div class="form-group">
                     <label for="night-start">Night Start</label>
                     <input type="time" id="night-start" name="NIGHT_START" required>
                 </div>
@@ -735,6 +740,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 document.getElementById('show-express').checked = settings.SHOW_EXPRESS !== false;
                 document.getElementById('colored').checked = settings.COLORED || false;
                 document.getElementById('subway-colors').checked = settings.SUBWAY_COLORS || false;
+                document.getElementById('timezone').value = settings.TIMEZONE !== undefined ? settings.TIMEZONE : 1;
                 document.getElementById('night-start').value = settings.NIGHT_START || '22:00';
                 document.getElementById('night-end').value = settings.NIGHT_END || '06:00';
                 document.getElementById('night-dimming').value = settings.NIGHT_DIMMING !== undefined ? settings.NIGHT_DIMMING : 3;
@@ -863,6 +869,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 SHOW_EXPRESS: document.getElementById('show-express').checked,
                 COLORED: document.getElementById('colored').checked,
                 SUBWAY_COLORS: document.getElementById('subway-colors').checked,
+                TIMEZONE: parseInt(document.getElementById('timezone').value),
                 NIGHT_START: document.getElementById('night-start').value,
                 NIGHT_END: document.getElementById('night-end').value,
                 NIGHT_DIMMING: parseInt(document.getElementById('night-dimming').value)
