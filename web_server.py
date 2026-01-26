@@ -770,7 +770,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
         async function searchStations(query) {
             try {
-                const response = await fetch(`http://a6n.de:33000/stops?query=${encodeURIComponent(query)}`);
+                const response = await fetch(`https://v6.bvg.transport.rest/stops?query=${encodeURIComponent(query)}`);
                 const data = await response.json();
 
                 // Filter and transform results

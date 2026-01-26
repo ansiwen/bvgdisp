@@ -549,12 +549,14 @@ async def data_fetch_task():
                                 print("time set")
                                 continue
 
+                            #parse_start_ms = time.ticks_ms()
                             # Stream parse JSON response
                             while True:
                                 chunk = await response.content.read(1024)
                                 if not chunk:
                                     break
                                 parser_feed(chunk)
+                            #print("parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms))
 
                             # Process parsed departures
                             new_data = []
@@ -568,6 +570,7 @@ async def data_fetch_task():
                                 dest = dest.replace("[Endstelle]", "")
                                 dest = dest.replace("(Berlin)", "")
                                 dest = dest.replace("  ", " ")
+                                dest = dest.strip()
 
                                 new_data.append((line, typ, dest, when))
 
@@ -615,7 +618,7 @@ async def check_night_time_task():
         else:
             # Overnight range (e.g., 22:00 to 06:00)
             is_night_time = current_minutes >= start_minutes or current_minutes < end_minutes
-        await asyncio.sleep(60-now[6]%60)
+        await asyncio.sleep(85-(now[6]+30)%60)
 
 
 # Main entry point
