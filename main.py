@@ -359,9 +359,6 @@ def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=F
         if glyph is None:
             continue
         width = glyph[0]-1
-        if cursor_x + width > clip:
-            # don't print part of character
-            break
         if kerning:
             for row in range(height):
                 if bold:
@@ -372,6 +369,9 @@ def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=F
                     cursor_x += 1
                     break
             last_col = [False]*(height+2)
+        if cursor_x + width > clip:
+            # don't print partial character
+            break
         if cursor_x + width <= x:
             # invisible
             cursor_x += width
