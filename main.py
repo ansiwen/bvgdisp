@@ -4,13 +4,78 @@ import machine
 import network
 import asyncio
 import aiohttp
-import json
-import ntptime
-import hub75
+from hub75 import Hub75
 from picographics import PicoGraphics
 from font_bvg import font_small
 import settings
 import hw_conf
+
+parser_departures = []
+parser_partial_dep = ""
+
+def parser_clear():
+    global parser_departures, parser_partial_dep
+    parser_departures = []
+    parser_partial_dep = ""
+
+def parser_feed(chunk):
+    global parser_departures, parser_partial_dep
+    #print("feed:", len(chunk))
+
+    data = parser_partial_dep + chunk if parser_partial_dep else chunk
+
+    offset = len(parser_partial_dep)-3
+    if offset < 0:
+        offset = 0
+
+    end = 0
+
+    while True:
+        if end > 0:
+            data = data[end:]
+        end = data.find('\n\t\t}', offset)
+        if end == -1:
+            parser_partial_dep = data
+            return
+        end += 4
+
+        offset = 0
+
+        pos = data.find('\n\t\t\t"when": "', 0)
+        if pos == -1:
+            continue
+        pos += 13
+        nl = data.find('\n', pos)
+        when = data[pos:nl-2]
+
+        pos = data.find('\n\t\t\t"direction"', nl)
+        if pos == -1:
+            continue
+        pos += 18
+        nl = data.find('\n', pos)
+        direction = data[pos:nl-2]
+
+        pos = data.find('\n\t\t\t"line"', nl)
+        if pos == -1:
+            continue
+        pos += 13
+        pos = data.find('\n\t\t\t\t"name"', pos)
+        if pos == -1:
+            continue
+        pos += 14
+        nl = data.find('\n', pos)
+        line = data[pos:nl-2]
+
+        pos = data.find('\n\t\t\t\t"product"', nl)
+        if pos == -1:
+            continue
+        pos += 17
+        nl = data.find('\n', pos)
+        product = data[pos:nl-2]
+
+        #print("dep:", (line, product, direction, when))
+        parser_departures.append((line, product, direction, when))
+
 
 rtc = machine.RTC()
 
@@ -26,7 +91,7 @@ display = PicoGraphics(display=hw_conf.DISPLAY)
 
 WIDTH, HEIGHT = display.get_bounds()
 
-h75 = hub75.Hub75(WIDTH, HEIGHT, color_order=hw_conf.COLOR_ORDER)
+h75 = Hub75(WIDTH, HEIGHT, color_order=hw_conf.COLOR_ORDER)
 h75.start()
 
 
@@ -475,7 +540,7 @@ async def display_task():
 
 async def data_fetch_task():
     """Fetches data every 10 seconds"""
-    global shared_data
+    global shared_data, parser_departures
     print("fetch task started")
     time_set = False
     await asyncio.sleep(5) # give chance to read IP address
@@ -484,8 +549,9 @@ async def data_fetch_task():
             await safe_to_fetch.wait()
 #            print("fetching data")
             params = {
-                "results": "10",
+                "results": "14",
                 "duration": "30",
+                "pretty": "true",
                 "bus": "true" if settings.get('SHOW_BUS') else "false",
                 "tram": "true" if settings.get('SHOW_TRAM') else "false",
                 "subway": "true" if settings.get('SHOW_SUBWAY') else "false",
@@ -516,33 +582,31 @@ async def data_fetch_task():
                                 print("time set")
                                 continue
 
-                            #print("parse json from response")
-                            # Parse JSON from response
-                            resp = await response.json()
+                            # Stream parse JSON response
+                            while True:
+                                chunk = await response.content.read(1024)
+                                if not chunk:
+                                    break
+                                parser_feed(chunk.decode('utf-8'))
 
-                            #print("update shared data")
-                            # Update shared data
-                            if deps := resp.get("departures"):
-                                new_data = []
-                                for dep in deps:
-                                    if not dep.get("when"):
-                                        continue
-                                    
-                                    line = dep["line"]["name"]
-                                    if line in settings.get('FILTERED'):
-                                        continue
-                                    typ = dep["line"]["product"]
-                                    when = parse_iso_to_epoch(dep["when"])
-                                    #dest = dep["destination"]["name"]
-                                    dest = dep["direction"].split(", ")[-1]
-                                    if dest.endswith(" [Endstelle]"):
-                                        dest = dest[:-12]
-                                    if dest.endswith(" (Berlin)"):
-                                        dest = dest[:-9]
-                                    
-                                    
-                                    new_data.append((line, typ, dest, when))
-                                    
+                            # Process parsed departures
+                            new_data = []
+                            filtered = settings.get('FILTERED')
+                            for (line, typ, dest, when_str) in parser_departures:
+                                if line in filtered:
+                                    continue
+                                when = parse_iso_to_epoch(when_str)
+                                # Clean up destination
+                                dest = dest.split(", ")[-1]
+                                dest = dest.replace("[Endstelle]", "")
+                                dest = dest.replace("(Berlin)", "")
+                                dest = dest.replace("  ", " ")
+
+                                new_data.append((line, typ, dest, when))
+
+                            parser_clear()
+
+                            if new_data:
                                 shared_data = new_data
                                 print("updated data")
                         else:
