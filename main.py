@@ -11,12 +11,12 @@ import settings
 import hw_conf
 
 parser_departures = []
-parser_partial_dep = ""
+parser_partial_dep = b''
 
 def parser_clear():
     global parser_departures, parser_partial_dep
     parser_departures = []
-    parser_partial_dep = ""
+    parser_partial_dep = b''
 
 def parser_feed(chunk):
     global parser_departures, parser_partial_dep
@@ -33,7 +33,7 @@ def parser_feed(chunk):
     while True:
         if end > 0:
             data = data[end:]
-        end = data.find('\n\t\t}', offset)
+        end = data.find(b'\n\t\t}', offset)
         if end == -1:
             parser_partial_dep = data
             return
@@ -41,39 +41,39 @@ def parser_feed(chunk):
 
         offset = 0
 
-        pos = data.find('\n\t\t\t"when": "', 0)
+        pos = data.find(b'\n\t\t\t"when": "', 0)
         if pos == -1:
             continue
         pos += 13
-        nl = data.find('\n', pos)
-        when = data[pos:nl-2]
+        nl = data.find(b'\n', pos)
+        when = data[pos:nl-2].decode()
 
-        pos = data.find('\n\t\t\t"direction"', nl)
+        pos = data.find(b'\n\t\t\t"direction"', nl)
         if pos == -1:
             continue
         pos += 18
-        nl = data.find('\n', pos)
-        direction = data[pos:nl-2]
+        nl = data.find(b'\n', pos)
+        direction = data[pos:nl-2].decode()
 
-        pos = data.find('\n\t\t\t"line"', nl)
+        pos = data.find(b'\n\t\t\t"line"', nl)
         if pos == -1:
             continue
         pos += 13
-        pos = data.find('\n\t\t\t\t"name"', pos)
+        pos = data.find(b'\n\t\t\t\t"name"', pos)
         if pos == -1:
             continue
         pos += 14
-        nl = data.find('\n', pos)
-        line = data[pos:nl-2]
+        nl = data.find(b'\n', pos)
+        line = data[pos:nl-2].decode()
 
-        pos = data.find('\n\t\t\t\t"product"', nl)
+        pos = data.find(b'\n\t\t\t\t"product"', nl)
         if pos == -1:
             continue
         pos += 17
-        nl = data.find('\n', pos)
-        product = data[pos:nl-2]
+        nl = data.find(b'\n', pos)
+        product = data[pos:nl-2].decode()
 
-        #print("dep:", (line, product, direction, when))
+        #print("dep:", line, product, direction, when)
         parser_departures.append((line, product, direction, when))
 
 
@@ -554,7 +554,7 @@ async def data_fetch_task():
                                 chunk = await response.content.read(1024)
                                 if not chunk:
                                     break
-                                parser_feed(chunk.decode('utf-8'))
+                                parser_feed(chunk)
 
                             # Process parsed departures
                             new_data = []
