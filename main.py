@@ -102,49 +102,16 @@ BVG = (255, 170, 0)
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 
-def is_night_time():
-    """Check if current time is within night hours"""
-    now = rtc.datetime()
-    # RTC is UTC, apply timezone offset
-    tz_offset = settings.get('TIMEZONE') or 0
-    current_minutes = (now[4] + tz_offset) * 60 + now[5]  # (hours + tz) * 60 + minutes
-    # Normalize to 0-1439 range (24 hours = 1440 minutes)
-    current_minutes = current_minutes % 1440
-
-    start = settings.get('NIGHT_START')
-    end = settings.get('NIGHT_END')
-
-    start_h, start_m = map(int, start.split(':'))
-    end_h, end_m = map(int, end.split(':'))
-
-    start_minutes = start_h * 60 + start_m
-    end_minutes = end_h * 60 + end_m
-
-    if start_minutes <= end_minutes:
-        # Same day range (e.g., 08:00 to 18:00)
-        return start_minutes <= current_minutes < end_minutes
-    else:
-        # Overnight range (e.g., 22:00 to 06:00)
-        return current_minutes >= start_minutes or current_minutes < end_minutes
-
-def get_dimming():
-    """Get current dimming level (0-10), returns 10 if not night time"""
-    dimming = settings.get('NIGHT_DIMMING')
-    if dimming == 10:
-        return 10  # No dimming configured
-    if is_night_time():
-        return dimming  # Apply dimming (0 = off, 1-9 = dimmed)
-    return 10  # Daytime - full brightness
+is_night_time = False
 
 def set_pen(color):
     """Set pen with dimming applied. Color is (R, G, B) tuple."""
-    dim = get_dimming()
-    if dim == 10:
+    dim = settings.get('NIGHT_DIMMING')
+    if dim == 10 or not is_night_time:
         display.set_pen(display.create_pen(*color))
     else:
         dimmed = tuple(v * dim // 10 for v in color)
         display.set_pen(display.create_pen(*dimmed))
-
 
 console_y = 0
 def console(*args, clear=False):
@@ -621,6 +588,36 @@ async def data_fetch_task():
         await asyncio.sleep(10)
 #        print("waiting for finished display")
 
+async def check_night_time_task():
+    """Check if current time is within night hours"""
+    global is_night_time
+    while True:
+        print("check_night_time")
+        now = rtc.datetime()
+        # RTC is UTC, apply timezone offset
+        tz_offset = settings.get('TIMEZONE') or 0
+        current_minutes = (now[4] + tz_offset) * 60 + now[5]  # (hours + tz) * 60 + minutes
+        # Normalize to 0-1439 range (24 hours = 1440 minutes)
+        current_minutes = current_minutes % 1440
+
+        start = settings.get('NIGHT_START')
+        end = settings.get('NIGHT_END')
+
+        start_h, start_m = map(int, start.split(':'))
+        end_h, end_m = map(int, end.split(':'))
+
+        start_minutes = start_h * 60 + start_m
+        end_minutes = end_h * 60 + end_m
+
+        if start_minutes <= end_minutes:
+            # Same day range (e.g., 08:00 to 18:00)
+            is_night_time = start_minutes <= current_minutes < end_minutes
+        else:
+            # Overnight range (e.g., 22:00 to 06:00)
+            is_night_time = current_minutes >= start_minutes or current_minutes < end_minutes
+        await asyncio.sleep(60-now[6]%60)
+
+
 # Main entry point
 async def main():
     from web_server import start_web_server
@@ -635,7 +632,8 @@ async def main():
         # Normal mode: run data fetcher and display
         fetcher = asyncio.create_task(data_fetch_task())
         display_t = asyncio.create_task(display_task())
-        await asyncio.gather(fetcher, display_t)
+        check_night_time = asyncio.create_task(check_night_time_task())
+        await asyncio.gather(fetcher, display_t, check_night_time)
 
     web_server.close()
 
