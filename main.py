@@ -11,67 +11,70 @@ import settings
 import hw_conf
 
 parser_departures = []
-parser_partial_dep = b''
+parser_buffer = bytearray(8192)
+parser_buffer_size = 0
+parser_buffer_mv = memoryview(parser_buffer)
 
 def parser_clear():
-    global parser_departures, parser_partial_dep
+    global parser_departures, parser_buffer_size
     parser_departures = []
-    parser_partial_dep = b''
+    parser_buffer_size = 0
 
-def parser_feed(chunk):
-    global parser_departures, parser_partial_dep
-    #print("feed:", len(chunk))
+def parser_feed(chunk_size):
+    global parser_departures, parser_buffer, parser_buffer_size, parser_buffer_mv
+    #print("feed:", parser_buffer[0:1024])
 
-    data = parser_partial_dep + chunk if parser_partial_dep else chunk
+    search_offset = parser_buffer_size-3
+    if search_offset < 0:
+        search_offset = 0
 
-    offset = len(parser_partial_dep)-3
-    if offset < 0:
-        offset = 0
+    parser_buffer_size += chunk_size
+    if parser_buffer_size > 8192:
+        print("parser_buffer too small", parser_buffer_size)
 
     end = 0
 
     while True:
-        if end > 0:
-            data = data[end:]
-        end = data.find(b'\n\t\t}', offset)
-        if end == -1:
-            parser_partial_dep = data
+        pos = parser_buffer.find(b'\n\t\t}', search_offset, parser_buffer_size)
+        if pos == -1:
+            if end:
+                parser_buffer_mv[0:parser_buffer_size-end] = parser_buffer_mv[end:parser_buffer_size]
+                parser_buffer_size = parser_buffer_size-end
             return
-        end += 4
+        end = pos+4
+        search_offset = end
 
-        offset = 0
-
-        pos = data.find(b'\n\t\t\t"when": "', 0)
+        pos = parser_buffer.find(b'\n\t\t\t"when": "', 0, parser_buffer_size)
         if pos == -1:
             continue
         pos += 13
-        nl = data.find(b'\n', pos)
-        when = data[pos:nl-2].decode()
+        nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
+        when = parser_buffer[pos:nl-2].decode()
 
-        pos = data.find(b'\n\t\t\t"direction"', nl)
+        pos = parser_buffer.find(b'\n\t\t\t"direction"', nl, parser_buffer_size)
         if pos == -1:
             continue
         pos += 18
-        nl = data.find(b'\n', pos)
-        direction = data[pos:nl-2].decode()
+        nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
+        direction = parser_buffer[pos:nl-2].decode()
 
-        pos = data.find(b'\n\t\t\t"line"', nl)
+        pos = parser_buffer.find(b'\n\t\t\t"line"', nl, parser_buffer_size)
         if pos == -1:
             continue
         pos += 13
-        pos = data.find(b'\n\t\t\t\t"name"', pos)
+        pos = parser_buffer.find(b'\n\t\t\t\t"name"', pos, parser_buffer_size)
         if pos == -1:
             continue
         pos += 14
-        nl = data.find(b'\n', pos)
-        line = data[pos:nl-2].decode()
+        nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
+        line = parser_buffer[pos:nl-2].decode()
 
-        pos = data.find(b'\n\t\t\t\t"product"', nl)
+        pos = parser_buffer.find(b'\n\t\t\t\t"product"', nl, parser_buffer_size)
         if pos == -1:
             continue
         pos += 17
-        nl = data.find(b'\n', pos)
-        product = data[pos:nl-2].decode()
+        nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
+        product = parser_buffer[pos:nl-2].decode()
 
         #print("dep:", line, product, direction, when)
         parser_departures.append((line, product, direction, when))
@@ -516,7 +519,7 @@ async def data_fetch_task():
             await safe_to_fetch.wait()
 #            print("fetching data")
             params = {
-                "results": "14",
+                #"results": "14",
                 "duration": "30",
                 "pretty": "true",
                 "bus": "true" if settings.get('SHOW_BUS') else "false",
@@ -552,10 +555,10 @@ async def data_fetch_task():
                             #parse_start_ms = time.ticks_ms()
                             # Stream parse JSON response
                             while True:
-                                chunk = await response.content.read(1024)
-                                if not chunk:
+                                size = await response.content.readinto(parser_buffer_mv[parser_buffer_size:parser_buffer_size+1024])
+                                if not size:
                                     break
-                                parser_feed(chunk)
+                                parser_feed(size)
                             #print("parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms))
 
                             # Process parsed departures
