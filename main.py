@@ -20,6 +20,7 @@ def parser_clear():
     parser_departures = []
     parser_buffer_size = 0
 
+@micropython.native
 def decode(b):
     try:
         s = b.decode()
@@ -30,6 +31,7 @@ def decode(b):
             s += chr(c)
     return s
 
+@micropython.native
 def parser_feed(chunk_size):
     global parser_departures, parser_buffer, parser_buffer_size, parser_buffer_mv
     #print("feed:", parser_buffer[0:1024])
@@ -117,6 +119,7 @@ WHITE = (255, 255, 255)
 
 is_night_time = False
 
+@micropython.native
 def set_pen(color):
     """Set pen with dimming applied. Color is (R, G, B) tuple."""
     dim = settings.get('NIGHT_DIMMING')
@@ -219,6 +222,7 @@ def connectivity_test(host='1.1.1.1', port=80, timeout=60):
         time.sleep(1)
         machine.reset()
 
+@micropython.native
 def parse_iso_to_epoch(date_str):    
     # Split off timezone
     dt_part = date_str[:19]  # "2026-01-04T04:46:00"
@@ -245,6 +249,7 @@ def parse_iso_to_epoch(date_str):
     # Adjust for timezone (subtract to convert to UTC)
     return timestamp - tz_offset
 
+@micropython.native
 def parse_http_date(date_str):
     # "Mon, 05 Jan 2026 19:17:30 GMT"
     import time
@@ -282,6 +287,7 @@ def parse_http_date(date_str):
 #         fb[c*y:c*(y+1)-4] = fb[c*y+4:c*(y+1)]
 #         fb[c*(y+1)-4:c*(y+1)-1] = x0
 
+@micropython.native
 def banner():
     import pngdec
     png = pngdec.PNG(display)
@@ -313,17 +319,18 @@ def banner():
         display.pixel(127-i, pos_y)
         h75.update(display)
 
-def normalize(a, b, c):
-    max = a
-    if b > max:
-        max = b
-    if c > max:
-        max = c
-    a = a*255//max
-    b = b*255//max
-    c = c*255//max
-    return a, b, c
+# def normalize(a, b, c):
+#     max = a
+#     if b > max:
+#         max = b
+#     if c > max:
+#         max = c
+#     a = a*255//max
+#     b = b*255//max
+#     c = c*255//max
+#     return a, b, c
 
+@micropython.native
 def typ2col(t, l):
     """Return color tuple for transport type and line"""
     if t == "tram" or t == "regional":
@@ -355,6 +362,7 @@ def typ2col(t, l):
         return (17, 93, 145)
     return BVG
 
+@micropython.native
 def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=False):
     if not s:
         return 0

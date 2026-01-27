@@ -46,6 +46,7 @@ def _save():
         f.write(data.replace("{", "{\n").replace("}", "\n}\n"))
     print(f"Settings saved to {SETTINGS_FILE}")
 
+@micropython.native
 def get(key=None):
     """Get a setting value by key, or all settings if no key provided"""
     if _settings is None:
