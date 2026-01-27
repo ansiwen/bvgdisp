@@ -290,6 +290,7 @@ def parse_http_date(date_str):
 @micropython.native
 def banner():
     import pngdec
+    import random
     png = pngdec.PNG(display)
     png.open_file("ansiwen128x64.png")
     pos_y = HEIGHT//2 - 16
@@ -298,10 +299,11 @@ def banner():
         h75.update(display)
     time.sleep_ms(200)
     set_pen(BLACK)
-    for i in range(10):
+    for i in list(random.randint(0, 1) for x in range(15)):
         time.sleep_ms(20)
-        display.clear()
-        h75.update(display)
+        if i:
+            display.clear()
+            h75.update(display)
         png.decode(0, pos_y, source=(0, 32, 128, 32))
         h75.update(display)
     for i in range(16):
