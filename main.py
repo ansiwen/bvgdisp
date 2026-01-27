@@ -359,8 +359,10 @@ def typ2col(t, l):
                 return (34, 79, 134)
             elif l == "U9":
                 return (243, 121, 29)
+        print("Unkown subway:", l)
         return (17, 93, 145)
-    return BVG
+    print("Unkown type:", t)
+    return WHITE
 
 @micropython.native
 def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=False):
