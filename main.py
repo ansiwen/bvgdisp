@@ -9,6 +9,7 @@ from picographics import PicoGraphics
 from font_bvg import font_small
 import settings
 import hw_conf
+import gc
 
 parser_departures = []
 parser_buffer = bytearray(8192)
@@ -45,8 +46,12 @@ def parser_feed(chunk_size):
         print("parser_buffer too small", parser_buffer_size)
 
     end = 0
+    success = True
 
     while True:
+        if not success:
+            print("parsing failed:", parser_buffer[0:end])
+            success = True
         pos = parser_buffer.find(b'\n\t\t}', search_offset, parser_buffer_size)
         if pos == -1:
             if end:
@@ -56,37 +61,50 @@ def parser_feed(chunk_size):
         end = pos+4
         search_offset = end
 
-        pos = parser_buffer.find(b'\n\t\t\t"when": "', 0, parser_buffer_size)
+        pos = parser_buffer.find(b'\n\t\t\t"when": "', 0, end)
         if pos == -1:
             continue
         pos += 13
-        nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
+
+        success = False
+
+        nl = parser_buffer.find(b'\n', pos, end)
+        if nl == -1:
+            continue
         when = decode(parser_buffer[pos:nl-2])
 
-        pos = parser_buffer.find(b'\n\t\t\t"direction"', nl, parser_buffer_size)
+        pos = parser_buffer.find(b'\n\t\t\t"direction"', nl, end)
         if pos == -1:
             continue
         pos += 18
-        nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
+        nl = parser_buffer.find(b'\n', pos, end)
+        if nl == -1:
+            continue
         direction = decode(parser_buffer[pos:nl-2])
 
-        pos = parser_buffer.find(b'\n\t\t\t"line"', nl, parser_buffer_size)
+        pos = parser_buffer.find(b'\n\t\t\t"line"', nl, end)
         if pos == -1:
             continue
         pos += 13
-        pos = parser_buffer.find(b'\n\t\t\t\t"name"', pos, parser_buffer_size)
+        pos = parser_buffer.find(b'\n\t\t\t\t"name"', pos, end)
         if pos == -1:
             continue
         pos += 14
-        nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
+        nl = parser_buffer.find(b'\n', pos, end)
+        if nl == -1:
+            continue
         line = decode(parser_buffer[pos:nl-2])
 
-        pos = parser_buffer.find(b'\n\t\t\t\t"product"', nl, parser_buffer_size)
+        pos = parser_buffer.find(b'\n\t\t\t\t"product"', nl, end)
         if pos == -1:
             continue
         pos += 17
-        nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
+        nl = parser_buffer.find(b'\n', pos, end)
+        if nl == -1:
+            continue
         product = decode(parser_buffer[pos:nl-2])
+
+        success = True
 
         #print("dep:", line, product, direction, when)
         parser_departures.append((line, product, direction, when))
@@ -117,16 +135,16 @@ BVG = (255, 170, 0)
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 
-is_night_time = False
+dimming = 10
 
 @micropython.native
 def set_pen(color):
+    global dimming
     """Set pen with dimming applied. Color is (R, G, B) tuple."""
-    dim = settings.get('NIGHT_DIMMING')
-    if dim == 10 or not is_night_time:
+    if dimming == 10:
         display.set_pen(display.create_pen(*color))
     else:
-        dimmed = tuple(v * dim // 10 for v in color)
+        dimmed = tuple(v * dimming // 10 for v in color)
         display.set_pen(display.create_pen(*dimmed))
 
 console_y = 0
@@ -333,7 +351,7 @@ def banner():
 #     return a, b, c
 
 @micropython.native
-def typ2col(t, l):
+def typ2col(t, l, subcol):
     """Return color tuple for transport type and line"""
     if t == "tram" or t == "regional":
         return (190, 20, 20)
@@ -342,7 +360,7 @@ def typ2col(t, l):
     elif t == "suburban":
         return (0, 141, 79)
     elif t == "subway":
-        if settings.get('SUBWAY_COLORS'):
+        if subcol:
             if l == "U1":
                 return (125, 173, 76)
             elif l == "U2":
@@ -477,6 +495,11 @@ async def display_task():
             y = 0
             if HEIGHT == 64:
                 y = 1
+
+            walk_delay = settings.get('WALK_DELAY')
+            colored = settings.get('COLORED')
+            sub_colors = settings.get('SUBWAY_COLORS')
+            dest_offset = settings.get('DEST_OFFSET')
             
             for (line, typ, dest, when) in data:
                 if y > HEIGHT-8:
@@ -484,7 +507,7 @@ async def display_task():
 
                 #print("when", when, "now", now)
                 eta_n = (when-now+45)
-                if eta_n < settings.get('WALK_DELAY'):
+                if eta_n < walk_delay:
                     continue
 
                 eta_n //= 60
@@ -497,11 +520,11 @@ async def display_task():
                         dest = None
                 else:
                     eta_s = str(eta_n) + "'"
-                if settings.get('COLORED'):
-                    set_pen(typ2col(typ, line))
+                if colored:
+                    set_pen(typ2col(typ, line, sub_colors))
 #                display.rectangle(0, y, dest_offset-2, 8)
 #                display.set_pen(BLACK)
-                dest_offset = settings.get('DEST_OFFSET')
+                dest_offset = dest_offset
                 line_size = pprint(line, 0, y, bold=True, kerning=True, measure=True)
                 pprint(line, dest_offset-line_size-3, y, bold=True, kerning=True)
                 set_pen(BVG)
@@ -539,10 +562,11 @@ async def data_fetch_task():
     while True:
         try:
             await safe_to_fetch.wait()
+            gc.collect()
 #            print("fetching data")
             params = {
-                #"results": "14",
-                "duration": "30",
+                "results": "14",
+                "duration": "60",
                 "pretty": "true",
                 "bus": "true" if settings.get('SHOW_BUS') else "false",
                 "tram": "true" if settings.get('SHOW_TRAM') else "false",
@@ -574,14 +598,14 @@ async def data_fetch_task():
                                 print("time set")
                                 continue
 
-                            #parse_start_ms = time.ticks_ms()
+                            parse_start_ms = time.ticks_ms()
                             # Stream parse JSON response
                             while True:
                                 size = await response.content.readinto(parser_buffer_mv[parser_buffer_size:parser_buffer_size+1024])
                                 if not size:
                                     break
                                 parser_feed(size)
-                            #print("parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms))
+                            print("parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms))
 
                             # Process parsed departures
                             new_data = []
@@ -612,13 +636,14 @@ async def data_fetch_task():
             print(f"Fetch task failed: {e}")
             sys.print_exception(e)
 
+        print("memfree:", gc.mem_free())
 #        print("fetch finished")
         await asyncio.sleep(10)
 #        print("waiting for finished display")
 
 async def check_night_time_task():
     """Check if current time is within night hours"""
-    global is_night_time
+    global dimming
     while True:
         print("check_night_time")
         now = rtc.datetime()
@@ -626,7 +651,7 @@ async def check_night_time_task():
         tz_offset = settings.get('TIMEZONE') or 0
         current_minutes = (now[4] + tz_offset) * 60 + now[5]  # (hours + tz) * 60 + minutes
         # Normalize to 0-1439 range (24 hours = 1440 minutes)
-        current_minutes = current_minutes % 1440
+        current_minutes = current_minutes % 1440 + 1
 
         start = settings.get('NIGHT_START')
         end = settings.get('NIGHT_END')
@@ -639,10 +664,16 @@ async def check_night_time_task():
 
         if start_minutes <= end_minutes:
             # Same day range (e.g., 08:00 to 18:00)
-            is_night_time = start_minutes <= current_minutes < end_minutes
+            if start_minutes <= current_minutes < end_minutes:
+                dimming = settings.get('NIGHT_DIMMING')
+            else:
+                dimming = 10
         else:
             # Overnight range (e.g., 22:00 to 06:00)
-            is_night_time = current_minutes >= start_minutes or current_minutes < end_minutes
+            if current_minutes >= start_minutes or current_minutes < end_minutes:
+                dimming = settings.get('NIGHT_DIMMING')
+            else:
+                dimming = 10
         await asyncio.sleep(85-(now[6]+30)%60)
 
 
