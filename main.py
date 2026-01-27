@@ -20,6 +20,16 @@ def parser_clear():
     parser_departures = []
     parser_buffer_size = 0
 
+def decode(b):
+    try:
+        s = b.decode()
+    except UnicodeError:
+        print("UnicodeError:", b)
+        s = ""
+        for c in b:
+            s += chr(c)
+    return s
+
 def parser_feed(chunk_size):
     global parser_departures, parser_buffer, parser_buffer_size, parser_buffer_mv
     #print("feed:", parser_buffer[0:1024])
@@ -49,14 +59,14 @@ def parser_feed(chunk_size):
             continue
         pos += 13
         nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
-        when = parser_buffer[pos:nl-2].decode()
+        when = decode(parser_buffer[pos:nl-2])
 
         pos = parser_buffer.find(b'\n\t\t\t"direction"', nl, parser_buffer_size)
         if pos == -1:
             continue
         pos += 18
         nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
-        direction = parser_buffer[pos:nl-2].decode()
+        direction = decode(parser_buffer[pos:nl-2])
 
         pos = parser_buffer.find(b'\n\t\t\t"line"', nl, parser_buffer_size)
         if pos == -1:
@@ -67,14 +77,14 @@ def parser_feed(chunk_size):
             continue
         pos += 14
         nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
-        line = parser_buffer[pos:nl-2].decode()
+        line = decode(parser_buffer[pos:nl-2])
 
         pos = parser_buffer.find(b'\n\t\t\t\t"product"', nl, parser_buffer_size)
         if pos == -1:
             continue
         pos += 17
         nl = parser_buffer.find(b'\n', pos, parser_buffer_size)
-        product = parser_buffer[pos:nl-2].decode()
+        product = decode(parser_buffer[pos:nl-2])
 
         #print("dep:", line, product, direction, when)
         parser_departures.append((line, product, direction, when))
