@@ -379,7 +379,8 @@ def typ2col(t, l, subcol):
                 return (34, 79, 134)
             elif l == "U9":
                 return (243, 121, 29)
-        print("Unkown subway:", l)
+            else:
+                print("Unkown subway:", l)
         return (17, 93, 145)
     print("Unkown type:", t)
     return WHITE
