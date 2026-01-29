@@ -554,11 +554,13 @@ async def display_task():
         elapsed_ms = time.ticks_diff(time.ticks_ms(), start_ms)
         await asyncio.sleep_ms(max(1, 1000 - elapsed_ms))
 
+
+time_set = False
+
 async def data_fetch_task():
     """Fetches data every 10 seconds"""
-    global shared_data, parser_departures
+    global shared_data, parser_departures, time_set
     print("fetch task started")
-    time_set = False
     await asyncio.sleep(5) # give chance to read IP address
     while True:
         try:
@@ -644,7 +646,9 @@ async def data_fetch_task():
 
 async def check_night_time_task():
     """Check if current time is within night hours"""
-    global dimming
+    global dimming, time_set
+    while not time_set:
+        await asyncio.sleep(1)
     while True:
         print("check_night_time")
         now = rtc.datetime()
