@@ -16,10 +16,12 @@ parser_buffer = bytearray(8192)
 parser_buffer_size = 0
 parser_buffer_mv = memoryview(parser_buffer)
 
+
 def parser_clear():
     global parser_departures, parser_buffer_size
     parser_departures = []
     parser_buffer_size = 0
+
 
 @micropython.native
 def decode(b):
@@ -32,12 +34,13 @@ def decode(b):
             s += chr(c)
     return s
 
+
 @micropython.native
 def parser_feed(chunk_size):
     global parser_departures, parser_buffer, parser_buffer_size, parser_buffer_mv
-    #print("feed:", parser_buffer[0:1024])
+    # print("feed:", parser_buffer[0:1024])
 
-    search_offset = parser_buffer_size-3
+    search_offset = parser_buffer_size - 3
     if search_offset < 0:
         search_offset = 0
 
@@ -52,13 +55,15 @@ def parser_feed(chunk_size):
         if not success:
             print("parsing failed:", parser_buffer[0:end])
             success = True
-        pos = parser_buffer.find(b'\n\t\t}', search_offset, parser_buffer_size)
+        pos = parser_buffer.find(b"\n\t\t}", search_offset, parser_buffer_size)
         if pos == -1:
             if end:
-                parser_buffer_mv[0:parser_buffer_size-end] = parser_buffer_mv[end:parser_buffer_size]
-                parser_buffer_size = parser_buffer_size-end
+                parser_buffer_mv[0 : parser_buffer_size - end] = parser_buffer_mv[
+                    end:parser_buffer_size
+                ]
+                parser_buffer_size = parser_buffer_size - end
             return
-        end = pos+4
+        end = pos + 4
         search_offset = end
 
         pos = parser_buffer.find(b'\n\t\t\t"when": "', 0, end)
@@ -68,19 +73,19 @@ def parser_feed(chunk_size):
 
         success = False
 
-        nl = parser_buffer.find(b'\n', pos, end)
+        nl = parser_buffer.find(b"\n", pos, end)
         if nl == -1:
             continue
-        when = decode(parser_buffer[pos:nl-2])
+        when = decode(parser_buffer[pos : nl - 2])
 
         pos = parser_buffer.find(b'\n\t\t\t"direction"', nl, end)
         if pos == -1:
             continue
         pos += 18
-        nl = parser_buffer.find(b'\n', pos, end)
+        nl = parser_buffer.find(b"\n", pos, end)
         if nl == -1:
             continue
-        direction = decode(parser_buffer[pos:nl-2])
+        direction = decode(parser_buffer[pos : nl - 2])
 
         pos = parser_buffer.find(b'\n\t\t\t"line"', nl, end)
         if pos == -1:
@@ -90,23 +95,23 @@ def parser_feed(chunk_size):
         if pos == -1:
             continue
         pos += 14
-        nl = parser_buffer.find(b'\n', pos, end)
+        nl = parser_buffer.find(b"\n", pos, end)
         if nl == -1:
             continue
-        line = decode(parser_buffer[pos:nl-2])
+        line = decode(parser_buffer[pos : nl - 2])
 
         pos = parser_buffer.find(b'\n\t\t\t\t"product"', nl, end)
         if pos == -1:
             continue
         pos += 17
-        nl = parser_buffer.find(b'\n', pos, end)
+        nl = parser_buffer.find(b"\n", pos, end)
         if nl == -1:
             continue
-        product = decode(parser_buffer[pos:nl-2])
+        product = decode(parser_buffer[pos : nl - 2])
 
         success = True
 
-        #print("dep:", line, product, direction, when)
+        # print("dep:", line, product, direction, when)
         parser_departures.append((line, product, direction, when))
 
 
@@ -137,6 +142,7 @@ WHITE = (255, 255, 255)
 
 dimming = 10
 
+
 @micropython.native
 def set_pen(color):
     global dimming
@@ -147,22 +153,26 @@ def set_pen(color):
         dimmed = tuple(v * dimming // 10 for v in color)
         display.set_pen(display.create_pen(*dimmed))
 
+
 console_y = 0
+
+
 def console(*args, clear=False):
     global console_y
     set_pen(RED)
     if clear:
-        console_y=0
+        console_y = 0
         set_pen(BLACK)
         display.clear()
         display
         set_pen(RED)
     str_args = [str(arg) for arg in args]
-    s = ' '.join(str_args)
+    s = " ".join(str_args)
     print(s)
-    display.text(s, 0, console_y-1, scale=1)
+    display.text(s, 0, console_y - 1, scale=1)
     h75.update(display)
-    console_y+=6
+    console_y += 6
+
 
 def start_ap_mode():
     """Start WiFi Access Point for configuration"""
@@ -170,12 +180,11 @@ def start_ap_mode():
     ap_mode = True
     ap = network.WLAN(network.AP_IF)
 
-
     # Disable station mode
     wlan.active(False)
 
     # Enable AP mode
-    ap.config(essid='BVGdisplay', security=0)  # Open network for easy setup
+    ap.config(essid="BVGdisplay", security=0)  # Open network for easy setup
     ap.active(True)
 
     # Wait for AP to be active
@@ -190,6 +199,7 @@ def start_ap_mode():
     print(f"AP Mode active. IP: {ip}")
     return ip
 
+
 def network_connect(SSID, PSK):
     """Try to connect to WiFi. Returns True on success, False on failure."""
     for i in range(6):
@@ -200,14 +210,14 @@ def network_connect(SSID, PSK):
             wlan.active(True)
         # Sets the Wireless LED pulsing and attempts to connect to your local network.
         console(f"connecting to {SSID}...", clear=True)
-        wlan.config(pm=0xa11140)  # Turn WiFi power saving off for some slow APs
+        wlan.config(pm=0xA11140)  # Turn WiFi power saving off for some slow APs
         wlan.connect(SSID, PSK)
 
         for j in range(10):
             print("wlan.status:", wlan.status())
             if wlan.status() < 0 or wlan.status() >= 3:
                 break
-            print('waiting for connection...')
+            print("waiting for connection...")
             time.sleep(1)
 
         # Handle connection error. Switches the Warn LED on.
@@ -224,7 +234,8 @@ def network_connect(SSID, PSK):
     console("Failed to connect.")
     return False
 
-def connectivity_test(host='1.1.1.1', port=80, timeout=60):
+
+def connectivity_test(host="1.1.1.1", port=80, timeout=60):
     """Minimal blocking TCP connectivity test. Returns True if connected."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -234,18 +245,20 @@ def connectivity_test(host='1.1.1.1', port=80, timeout=60):
         return True
     except Exception as e:
         import sys
+
         print(f"Connectivity test failed: {e}")
         sys.print_exception(e)
         console("No Internet. Restarting...")
         time.sleep(1)
         machine.reset()
 
+
 @micropython.native
-def parse_iso_to_epoch(date_str):    
+def parse_iso_to_epoch(date_str):
     # Split off timezone
     dt_part = date_str[:19]  # "2026-01-04T04:46:00"
     tz_part = date_str[19:]  # "+01:00"
-    
+
     # Parse date and time
     year = int(dt_part[0:4])
     month = int(dt_part[5:7])
@@ -253,29 +266,39 @@ def parse_iso_to_epoch(date_str):
     hour = int(dt_part[11:13])
     minute = int(dt_part[14:16])
     second = int(dt_part[17:19])
-    
+
     # Parse timezone offset
-    tz_sign = 1 if tz_part[0] == '+' else -1
+    tz_sign = 1 if tz_part[0] == "+" else -1
     tz_hours = int(tz_part[1:3])
     tz_mins = int(tz_part[4:6])
     tz_offset = tz_sign * (tz_hours * 3600 + tz_mins * 60)
-    
+
     # Convert to epoch (UTC)
     # mktime expects: (year, month, day, hour, min, sec, weekday, yearday)
     timestamp = time.mktime((year, month, day, hour, minute, second, 0, 0))
-    
+
     # Adjust for timezone (subtract to convert to UTC)
     return timestamp - tz_offset
+
 
 @micropython.native
 def parse_http_date(date_str):
     # "Mon, 05 Jan 2026 19:17:30 GMT"
     import time
-    
+
     months = {
-        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-        'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-        'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+        "Jan": 1,
+        "Feb": 2,
+        "Mar": 3,
+        "Apr": 4,
+        "May": 5,
+        "Jun": 6,
+        "Jul": 7,
+        "Aug": 8,
+        "Sep": 9,
+        "Oct": 10,
+        "Nov": 11,
+        "Dec": 12,
     }
 
     parts = date_str.split()
@@ -283,12 +306,13 @@ def parse_http_date(date_str):
     month = months[parts[2]]
     year = int(parts[3])
 
-    hour, minute, second = map(int, parts[4].split(':'))
+    hour, minute, second = map(int, parts[4].split(":"))
 
     # RTC.datetime() format: (year, month, day, weekday, hours, minutes, seconds, subseconds)
     timestamp = (year, month, day, 0, hour, minute, second, 0)
 
     return timestamp
+
 
 # def text_bold(txt, x, y, scale=1):
 #     for c in txt:
@@ -296,7 +320,7 @@ def parse_http_date(date_str):
 #         display.text(c, x, y, scale=scale)
 #         #display.text(c, x+1, y, scale=scale)
 #         x += display.measure_text(c, scale)+2
-        
+
 # def scroll_x():
 #     fb = memoryview(display)
 #     for y in range(32):
@@ -305,13 +329,15 @@ def parse_http_date(date_str):
 #         fb[c*y:c*(y+1)-4] = fb[c*y+4:c*(y+1)]
 #         fb[c*(y+1)-4:c*(y+1)-1] = x0
 
+
 @micropython.native
 def banner():
     import pngdec
     import random
+
     png = pngdec.PNG(display)
     png.open_file("ansiwen128x64.png")
-    pos_y = HEIGHT//2 - 16
+    pos_y = HEIGHT // 2 - 16
     for y in range(33):
         png.decode(0, pos_y, source=(0, y, 128, 32))
         h75.update(display)
@@ -326,8 +352,8 @@ def banner():
         h75.update(display)
     for i in range(16):
         time.sleep_ms(10)
-        display.line(0, pos_y+i, 128, pos_y+i)
-        display.line(0, pos_y+31-i, 128, pos_y+31-i)
+        display.line(0, pos_y + i, 128, pos_y + i)
+        display.line(0, pos_y + 31 - i, 128, pos_y + 31 - i)
         h75.update(display)
     set_pen(WHITE)
     pos_y += 16
@@ -336,8 +362,9 @@ def banner():
     for i in range(64):
         time.sleep_ms(3)
         display.pixel(i, pos_y)
-        display.pixel(127-i, pos_y)
+        display.pixel(127 - i, pos_y)
         h75.update(display)
+
 
 # def normalize(a, b, c):
 #     max = a
@@ -349,6 +376,7 @@ def banner():
 #     b = b*255//max
 #     c = c*255//max
 #     return a, b, c
+
 
 @micropython.native
 def typ2col(t, l, subcol):
@@ -385,34 +413,37 @@ def typ2col(t, l, subcol):
     print("Unkown type:", t)
     return WHITE
 
+
 @micropython.native
 def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=False):
     if not s:
         return 0
-    cursor_x = x-skip
+    cursor_x = x - skip
     height = font_small["fontheight"]
-    last_col = [False]*(height+2)
+    last_col = [False] * (height + 2)
     for char in s:
         if cursor_x >= clip:
             # invisible
             break
         if bold:
-            glyph = font_small.get("*"+char)
+            glyph = font_small.get("*" + char)
         if not bold or glyph == None:
             glyph = font_small.get(char)
         if glyph is None:
             continue
-        width = glyph[0]-1
+        width = glyph[0] - 1
         if kerning:
             for row in range(height):
                 if bold:
-                    check = glyph[row+1]>>width and (last_col[row+1])
+                    check = glyph[row + 1] >> width and (last_col[row + 1])
                 else:
-                    check = glyph[row+1]>>width and (last_col[row] or last_col[row+1] or last_col[row+2])
+                    check = glyph[row + 1] >> width and (
+                        last_col[row] or last_col[row + 1] or last_col[row + 2]
+                    )
                 if check:
                     cursor_x += 1
                     break
-            last_col = [False]*(height+2)
+            last_col = [False] * (height + 2)
         if cursor_x + width > clip:
             # don't print partial character
             break
@@ -421,9 +452,9 @@ def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=F
             cursor_x += width
             continue
         for row in range(height):
-            byte_val = glyph[row+1]
+            byte_val = glyph[row + 1]
             if kerning:
-                last_col[row+1] = byte_val&2 == 2
+                last_col[row + 1] = byte_val & 2 == 2
             if measure:
                 continue
             for col in range(width):
@@ -434,21 +465,22 @@ def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=F
                 if px < x:
                     # invisible
                     continue
-                if byte_val & (0x1 << (width-col)):
+                if byte_val & (0x1 << (width - col)):
                     display.pixel(px, y + row)
         # Move cursor for next character
         cursor_x += width
         if not kerning:
             cursor_x += 1
-    return cursor_x - x    
+    return cursor_x - x
+
 
 banner()
 
 set_pen(RED)
 
 # Check if WiFi credentials are configured
-ssid = settings.get('WIFI_SSID')
-password = settings.get('WIFI_PASSWORD')
+ssid = settings.get("WIFI_SSID")
+password = settings.get("WIFI_PASSWORD")
 
 if not ssid or ssid == "REPLACE_WITH_YOUR_SSID":
     console("No WiFi configured", clear=True)
@@ -467,6 +499,7 @@ safe_to_fetch.set()
 
 display.set_font("bitmap8")
 
+
 async def display_task():
     print("display task started")
     await asyncio.sleep_ms(500)
@@ -483,7 +516,7 @@ async def display_task():
             delta = time.ticks_diff(start_ms, last_ms)
             if last_ms > 0 and delta > 1050:
                 print("delta:", time.ticks_diff(start_ms, last_ms))
-        
+
             data = shared_data
 
             set_pen(BLACK)
@@ -497,59 +530,62 @@ async def display_task():
             if HEIGHT == 64:
                 y = 1
 
-            walk_delay = settings.get('WALK_DELAY')
-            colored = settings.get('COLORED')
-            sub_colors = settings.get('SUBWAY_COLORS')
-            dest_offset = settings.get('DEST_OFFSET')
-            
-            for (line, typ, dest, when) in data:
-                if y > HEIGHT-8:
+            walk_delay = settings.get("WALK_DELAY")
+            colored = settings.get("COLORED")
+            sub_colors = settings.get("SUBWAY_COLORS")
+            dest_offset = settings.get("DEST_OFFSET")
+
+            for line, typ, dest, when in data:
+                if y > HEIGHT - 8:
                     break
 
-                #print("when", when, "now", now)
-                eta_n = (when-now+45)
+                # print("when", when, "now", now)
+                eta_n = when - now + 45
                 if eta_n < walk_delay:
                     continue
 
                 eta_n //= 60
 
-                #print(line, dest, eta_n)
+                # print(line, dest, eta_n)
                 if eta_n < 1:
                     eta_s = None
-                    #eta_s = str(eta_n) + "'"
+                    # eta_s = str(eta_n) + "'"
                     if blink:
                         dest = None
                 else:
                     eta_s = str(eta_n) + "'"
                 if colored:
                     set_pen(typ2col(typ, line, sub_colors))
-#                display.rectangle(0, y, dest_offset-2, 8)
-#                display.set_pen(BLACK)
+                # display.rectangle(0, y, dest_offset-2, 8)
+                # display.set_pen(BLACK)
                 dest_offset = dest_offset
                 line_size = pprint(line, 0, y, bold=True, kerning=True, measure=True)
-                pprint(line, dest_offset-line_size-3, y, bold=True, kerning=True)
+                pprint(line, dest_offset - line_size - 3, y, bold=True, kerning=True)
                 set_pen(BVG)
                 dest_width = WIDTH - dest_offset - pprint("30'", measure=True) - 1
-                pprint(dest, dest_offset, y, clip=dest_offset+dest_width, kerning=True)
-                eta_offset = WIDTH - pprint(eta_s, measure=True)+1
+                pprint(
+                    dest, dest_offset, y, clip=dest_offset + dest_width, kerning=True
+                )
+                eta_offset = WIDTH - pprint(eta_s, measure=True) + 1
                 pprint(eta_s, eta_offset, y)
                 y += 8
                 if HEIGHT == 64:
                     y += 1
-                
+
             h75.update(display)
         except Exception as e:
             import sys
+
             print(f"Display task failed: {e}")
             sys.print_exception(e)
             print("last data:", data)
-        #print("---")
+        # print("---")
         blink = not blink
 
         # Signal fetch task: "I'm done, safe to run now"
-        safe_to_fetch.set()           # Wake up fetch task
-        await asyncio.sleep_ms(0)       # Yield to let fetch see signal
-        safe_to_fetch.clear()         # Clear immediately (edge-trigger)
+        safe_to_fetch.set()  # Wake up fetch task
+        await asyncio.sleep_ms(0)  # Yield to let fetch see signal
+        safe_to_fetch.clear()  # Clear immediately (edge-trigger)
 
         elapsed_ms = time.ticks_diff(time.ticks_ms(), start_ms)
         await asyncio.sleep_ms(max(1, 1000 - elapsed_ms))
@@ -557,92 +593,103 @@ async def display_task():
 
 time_set = False
 
+
 async def data_fetch_task():
     """Fetches data every 10 seconds"""
     global shared_data, parser_departures, time_set
     print("fetch task started")
-    await asyncio.sleep(5) # give chance to read IP address
+    await asyncio.sleep(5)  # give chance to read IP address
     while True:
         try:
             await safe_to_fetch.wait()
             gc.collect()
-#            print("fetching data")
+            # print("fetching data")
             params = {
                 "results": "14",
                 "duration": "60",
                 "pretty": "true",
-                "bus": "true" if settings.get('SHOW_BUS') else "false",
-                "tram": "true" if settings.get('SHOW_TRAM') else "false",
-                "subway": "true" if settings.get('SHOW_SUBWAY') else "false",
-                "regional": "true" if settings.get('SHOW_REGIONAL') else "false",
-                "suburban": "true" if settings.get('SHOW_SUBURBAN') else "false",
-                "ferry": "true" if settings.get('SHOW_FERRY') else "false",
-                "express": "true" if settings.get('SHOW_EXPRESS') else "false"
+                "bus": "true" if settings.get("SHOW_BUS") else "false",
+                "tram": "true" if settings.get("SHOW_TRAM") else "false",
+                "subway": "true" if settings.get("SHOW_SUBWAY") else "false",
+                "regional": "true" if settings.get("SHOW_REGIONAL") else "false",
+                "suburban": "true" if settings.get("SHOW_SUBURBAN") else "false",
+                "ferry": "true" if settings.get("SHOW_FERRY") else "false",
+                "express": "true" if settings.get("SHOW_EXPRESS") else "false",
             }
             if time_set:
-                params["when"] = time.time()+settings.get('WALK_DELAY')
+                params["when"] = time.time() + settings.get("WALK_DELAY")
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                        f'{settings.get("API_URL")}/stops/{settings.get("STATION_ID")}/departures',
-                        params=params
-                    ) as response:
-                        #print("got response")
-                        if response.status == 200:
-                            date = parse_http_date(response.headers["Date"])
-                            old_t = time.time()
-                            rtc.datetime(date)
-                            if time_set:
-                                diff = time.time() - old_t
-                                if diff < -1 or diff > 1:
-                                    print("time diff:", diff)
-                            
-                            if not time_set:
-                                time_set = True
-                                print("time set")
+                    f'{settings.get("API_URL")}/stops/{settings.get("STATION_ID")}/departures',
+                    params=params,
+                ) as response:
+                    # print("got response")
+                    if response.status == 200:
+                        date = parse_http_date(response.headers["Date"])
+                        old_t = time.time()
+                        rtc.datetime(date)
+                        if time_set:
+                            diff = time.time() - old_t
+                            if diff < -1 or diff > 1:
+                                print("time diff:", diff)
+
+                        if not time_set:
+                            time_set = True
+                            print("time set")
+                            continue
+
+                        parse_start_ms = time.ticks_ms()
+                        # Stream parse JSON response
+                        while True:
+                            size = await response.content.readinto(
+                                parser_buffer_mv[
+                                    parser_buffer_size : parser_buffer_size + 1024
+                                ]
+                            )
+                            if not size:
+                                break
+                            parser_feed(size)
+                        print(
+                            "parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms)
+                        )
+
+                        # Process parsed departures
+                        new_data = []
+                        filtered = settings.get("FILTERED")
+                        for line, typ, dest, when_str in parser_departures:
+                            if line in filtered:
                                 continue
+                            when = parse_iso_to_epoch(when_str)
+                            # Clean up destination
+                            dest = dest.split(", ")[-1]
+                            dest = dest.replace("[Endstelle]", "")
+                            dest = dest.replace("(Berlin)", "")
+                            dest = dest.replace("  ", " ")
+                            dest = dest.strip()
 
-                            parse_start_ms = time.ticks_ms()
-                            # Stream parse JSON response
-                            while True:
-                                size = await response.content.readinto(parser_buffer_mv[parser_buffer_size:parser_buffer_size+1024])
-                                if not size:
-                                    break
-                                parser_feed(size)
-                            print("parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms))
+                            new_data.append((line, typ, dest, when))
 
-                            # Process parsed departures
-                            new_data = []
-                            filtered = settings.get('FILTERED')
-                            for (line, typ, dest, when_str) in parser_departures:
-                                if line in filtered:
-                                    continue
-                                when = parse_iso_to_epoch(when_str)
-                                # Clean up destination
-                                dest = dest.split(", ")[-1]
-                                dest = dest.replace("[Endstelle]", "")
-                                dest = dest.replace("(Berlin)", "")
-                                dest = dest.replace("  ", " ")
-                                dest = dest.strip()
+                        parser_clear()
 
-                                new_data.append((line, typ, dest, when))
+                        if new_data:
+                            shared_data = new_data
+                            print("updated data")
+                    else:
+                        print("fetch failed:", response.status)
 
-                            parser_clear()
-
-                            if new_data:
-                                shared_data = new_data
-                                print("updated data")
-                        else:
-                            print("fetch failed:", response.status)
-                            
         except Exception as e:
             import sys
+
             print(f"Fetch task failed: {e}")
             sys.print_exception(e)
 
         print("memfree:", gc.mem_free())
-#        print("fetch finished")
+        # print("fetch finished")
         await asyncio.sleep(10)
-#        print("waiting for finished display")
+
+
+        # print("waiting for finished display")
+
 
 async def check_night_time_task():
     """Check if current time is within night hours"""
@@ -653,16 +700,18 @@ async def check_night_time_task():
         print("check_night_time")
         now = rtc.datetime()
         # RTC is UTC, apply timezone offset
-        tz_offset = settings.get('TIMEZONE') or 0
-        current_minutes = (now[4] + tz_offset) * 60 + now[5]  # (hours + tz) * 60 + minutes
+        tz_offset = settings.get("TIMEZONE") or 0
+        current_minutes = (now[4] + tz_offset) * 60 + now[
+            5
+        ]  # (hours + tz) * 60 + minutes
         # Normalize to 0-1439 range (24 hours = 1440 minutes)
         current_minutes = current_minutes % 1440 + 1
 
-        start = settings.get('NIGHT_START')
-        end = settings.get('NIGHT_END')
+        start = settings.get("NIGHT_START")
+        end = settings.get("NIGHT_END")
 
-        start_h, start_m = map(int, start.split(':'))
-        end_h, end_m = map(int, end.split(':'))
+        start_h, start_m = map(int, start.split(":"))
+        end_h, end_m = map(int, end.split(":"))
 
         start_minutes = start_h * 60 + start_m
         end_minutes = end_h * 60 + end_m
@@ -670,16 +719,16 @@ async def check_night_time_task():
         if start_minutes <= end_minutes:
             # Same day range (e.g., 08:00 to 18:00)
             if start_minutes <= current_minutes < end_minutes:
-                dimming = settings.get('NIGHT_DIMMING')
+                dimming = settings.get("NIGHT_DIMMING")
             else:
                 dimming = 10
         else:
             # Overnight range (e.g., 22:00 to 06:00)
             if current_minutes >= start_minutes or current_minutes < end_minutes:
-                dimming = settings.get('NIGHT_DIMMING')
+                dimming = settings.get("NIGHT_DIMMING")
             else:
                 dimming = 10
-        await asyncio.sleep(85-(now[6]+30)%60)
+        await asyncio.sleep(85 - (now[6] + 30) % 60)
 
 
 # Main entry point
@@ -691,7 +740,7 @@ async def main():
 
     if ap_mode:
         # In AP mode, only run the web server for configuration
-        await asyncio.Event().wait() # wait forever
+        await asyncio.Event().wait()  # wait forever
     else:
         # Normal mode: run data fetcher and display
         fetcher = asyncio.create_task(data_fetch_task())
@@ -700,6 +749,7 @@ async def main():
         await asyncio.gather(fetcher, display_t, check_night_time)
 
     web_server.close()
+
 
 # Start the event loop
 asyncio.run(main())

@@ -7,22 +7,22 @@ import settings
 
 # Session management
 _sessions = {}  # token -> last_activity_time
-_nonces = {}    # nonce -> expiry_time
+_nonces = {}  # nonce -> expiry_time
 SESSION_TIMEOUT = 600  # 10 minutes in seconds
-NONCE_TIMEOUT = 60     # 1 minute for nonce validity
+NONCE_TIMEOUT = 60  # 1 minute for nonce validity
 
 
 def _generate_hex(length=16):
     """Generate random hex string"""
-    return ''.join('%02x' % b for b in os.urandom(length))
+    return "".join("%02x" % b for b in os.urandom(length))
 
 
 def _sha256_hex(data):
     """Compute SHA256 and return hex string"""
     if isinstance(data, str):
-        data = data.encode('utf-8')
+        data = data.encode("utf-8")
     digest = hashlib.sha256(data).digest()
-    return ''.join('%02x' % b for b in digest)
+    return "".join("%02x" % b for b in digest)
 
 
 def _cleanup_expired():
@@ -40,7 +40,7 @@ def create_challenge():
     """Create challenge with nonce and salt for authentication"""
     _cleanup_expired()
     nonce = _generate_hex(16)
-    salt = settings.get('PASSWORD_SALT')
+    salt = settings.get("PASSWORD_SALT")
     _nonces[nonce] = time.time() + NONCE_TIMEOUT
     return nonce, salt
 
@@ -57,7 +57,7 @@ def verify_login(nonce, response):
     del _nonces[nonce]
 
     # Get stored password hash
-    password_hash = settings.get('PASSWORD_HASH')
+    password_hash = settings.get("PASSWORD_HASH")
 
     # Compute expected response: SHA256(password_hash + nonce)
     expected = _sha256_hex(password_hash + nonce)
@@ -99,7 +99,7 @@ def change_password(nonce, old_response, encrypted_new_hash, new_salt):
     del _nonces[nonce]
 
     # Verify old password
-    password_hash = settings.get('PASSWORD_HASH')
+    password_hash = settings.get("PASSWORD_HASH")
     expected = _sha256_hex(password_hash + nonce)
 
     if old_response != expected:
@@ -113,13 +113,13 @@ def change_password(nonce, old_response, encrypted_new_hash, new_salt):
     key = _sha256_hex(password_hash + nonce + "newpass")
 
     # XOR decrypt new hash
-    new_hash = ''.join(
-        '%02x' % (int(encrypted_new_hash[i:i+2], 16) ^ int(key[i:i+2], 16))
+    new_hash = "".join(
+        "%02x" % (int(encrypted_new_hash[i : i + 2], 16) ^ int(key[i : i + 2], 16))
         for i in range(0, 64, 2)
     )
 
     # Save new password hash and salt
-    settings.set({'PASSWORD_HASH': new_hash, 'PASSWORD_SALT': new_salt})
+    settings.set({"PASSWORD_HASH": new_hash, "PASSWORD_SALT": new_salt})
     return True, "Password changed"
 
 
@@ -996,12 +996,12 @@ HTML_PAGE = """<!DOCTYPE html>
 async def parse_request(reader):
     """Parse HTTP request and return method, path, headers, and body"""
     request_line = await reader.readline()
-    request_line = request_line.decode('utf-8').strip()
+    request_line = request_line.decode("utf-8").strip()
 
     if not request_line:
         return None, None, {}, None
 
-    parts = request_line.split(' ')
+    parts = request_line.split(" ")
     if len(parts) < 2:
         return None, None, {}, None
 
@@ -1012,20 +1012,20 @@ async def parse_request(reader):
     headers = {}
     while True:
         line = await reader.readline()
-        line = line.decode('utf-8').strip()
+        line = line.decode("utf-8").strip()
         if not line:
             break
-        if ':' in line:
-            key, value = line.split(':', 1)
+        if ":" in line:
+            key, value = line.split(":", 1)
             headers[key.strip().lower()] = value.strip()
 
     # Read body if present
     body = None
-    if 'content-length' in headers:
-        content_length = int(headers['content-length'])
+    if "content-length" in headers:
+        content_length = int(headers["content-length"])
         if content_length > 0:
             body = await reader.read(content_length)
-            body = body.decode('utf-8')
+            body = body.decode("utf-8")
 
     return method, path, headers, body
 
@@ -1033,7 +1033,7 @@ async def parse_request(reader):
 async def send_response(writer, status, content_type, body):
     """Send HTTP response"""
     if isinstance(body, str):
-        body = body.encode('utf-8')
+        body = body.encode("utf-8")
 
     response = f"HTTP/1.1 {status}\r\n"
     response += f"Content-Type: {content_type}\r\n"
@@ -1041,7 +1041,7 @@ async def send_response(writer, status, content_type, body):
     response += "Connection: close\r\n"
     response += "\r\n"
 
-    writer.write(response.encode('utf-8'))
+    writer.write(response.encode("utf-8"))
     writer.write(body)
     await writer.drain()
 
@@ -1059,95 +1059,156 @@ async def handle_client(reader, writer):
         print(f"Request: {method} {path}")
 
         # Route handling
-        if path == '/' or path == '/index.html':
+        if path == "/" or path == "/index.html":
             await send_response(writer, "200 OK", "text/html", HTML_PAGE)
 
-        elif path == '/api/auth/challenge' and method == 'GET':
+        elif path == "/api/auth/challenge" and method == "GET":
             # Generate challenge nonce and return salt
             nonce, salt = create_challenge()
-            await send_response(writer, "200 OK", "application/json", json.dumps({"nonce": nonce, "salt": salt}))
+            await send_response(
+                writer,
+                "200 OK",
+                "application/json",
+                json.dumps({"nonce": nonce, "salt": salt}),
+            )
 
-        elif path == '/api/auth/login' and method == 'POST':
+        elif path == "/api/auth/login" and method == "POST":
             # Verify login
             try:
                 data = json.loads(body)
-                token = verify_login(data.get('nonce'), data.get('response'))
+                token = verify_login(data.get("nonce"), data.get("response"))
                 if token:
-                    await send_response(writer, "200 OK", "application/json", json.dumps({"session": token}))
+                    await send_response(
+                        writer,
+                        "200 OK",
+                        "application/json",
+                        json.dumps({"session": token}),
+                    )
                 else:
-                    await send_response(writer, "401 Unauthorized", "application/json", '{"error":"Invalid credentials"}')
+                    await send_response(
+                        writer,
+                        "401 Unauthorized",
+                        "application/json",
+                        '{"error":"Invalid credentials"}',
+                    )
             except Exception as e:
                 print(f"Login error: {e}")
-                await send_response(writer, "400 Bad Request", "application/json", '{"error":"Invalid request"}')
+                await send_response(
+                    writer,
+                    "400 Bad Request",
+                    "application/json",
+                    '{"error":"Invalid request"}',
+                )
 
-        elif path == '/api/auth/logout' and method == 'POST':
+        elif path == "/api/auth/logout" and method == "POST":
             # Logout
-            token = headers.get('x-session')
+            token = headers.get("x-session")
             logout(token)
             await send_response(writer, "200 OK", "application/json", '{"status":"ok"}')
 
-        elif path == '/api/auth/password' and method == 'POST':
+        elif path == "/api/auth/password" and method == "POST":
             # Change password
-            token = headers.get('x-session')
+            token = headers.get("x-session")
             if not verify_session(token):
-                await send_response(writer, "401 Unauthorized", "application/json", '{"error":"Not authenticated"}')
+                await send_response(
+                    writer,
+                    "401 Unauthorized",
+                    "application/json",
+                    '{"error":"Not authenticated"}',
+                )
             else:
                 try:
                     data = json.loads(body)
                     success, msg = change_password(
-                        data.get('nonce'),
-                        data.get('old_response'),
-                        data.get('encrypted_new_hash'),
-                        data.get('new_salt')
+                        data.get("nonce"),
+                        data.get("old_response"),
+                        data.get("encrypted_new_hash"),
+                        data.get("new_salt"),
                     )
                     if success:
-                        await send_response(writer, "200 OK", "application/json", '{"status":"ok"}')
+                        await send_response(
+                            writer, "200 OK", "application/json", '{"status":"ok"}'
+                        )
                     else:
-                        await send_response(writer, "400 Bad Request", "application/json", json.dumps({"error": msg}))
+                        await send_response(
+                            writer,
+                            "400 Bad Request",
+                            "application/json",
+                            json.dumps({"error": msg}),
+                        )
                 except Exception as e:
                     print(f"Password change error: {e}")
-                    await send_response(writer, "400 Bad Request", "application/json", '{"error":"Invalid request"}')
+                    await send_response(
+                        writer,
+                        "400 Bad Request",
+                        "application/json",
+                        '{"error":"Invalid request"}',
+                    )
 
-        elif path == '/api/settings' and method == 'GET':
+        elif path == "/api/settings" and method == "GET":
             # Read current settings (requires auth)
-            token = headers.get('x-session')
+            token = headers.get("x-session")
             if not verify_session(token):
-                await send_response(writer, "401 Unauthorized", "application/json", '{"error":"Not authenticated"}')
+                await send_response(
+                    writer,
+                    "401 Unauthorized",
+                    "application/json",
+                    '{"error":"Not authenticated"}',
+                )
             else:
                 # Don't expose password hash or salt
                 all_settings = settings.get()
-                all_settings.pop('PASSWORD_HASH', None)
-                all_settings.pop('PASSWORD_SALT', None)
-                await send_response(writer, "200 OK", "application/json", json.dumps(all_settings))
+                all_settings.pop("PASSWORD_HASH", None)
+                all_settings.pop("PASSWORD_SALT", None)
+                await send_response(
+                    writer, "200 OK", "application/json", json.dumps(all_settings)
+                )
 
-        elif path == '/api/settings' and method == 'POST':
+        elif path == "/api/settings" and method == "POST":
             # Save settings (requires auth)
-            token = headers.get('x-session')
+            token = headers.get("x-session")
             if not verify_session(token):
-                await send_response(writer, "401 Unauthorized", "application/json", '{"error":"Not authenticated"}')
+                await send_response(
+                    writer,
+                    "401 Unauthorized",
+                    "application/json",
+                    '{"error":"Not authenticated"}',
+                )
             else:
                 try:
                     new_settings = json.loads(body)
                     # Don't allow setting password through this endpoint
-                    new_settings.pop('PASSWORD_HASH', None)
-                    new_settings.pop('PASSWORD_SALT', None)
+                    new_settings.pop("PASSWORD_HASH", None)
+                    new_settings.pop("PASSWORD_SALT", None)
                     settings.set(new_settings)
-                    await send_response(writer, "200 OK", "application/json", '{"status":"ok"}')
+                    await send_response(
+                        writer, "200 OK", "application/json", '{"status":"ok"}'
+                    )
                 except Exception as e:
                     print("saving settings failed:", e)
-                    await send_response(writer, "500 Internal Server Error", "text/plain", str(e))
+                    await send_response(
+                        writer, "500 Internal Server Error", "text/plain", str(e)
+                    )
 
-        elif path == '/api/restart' and method == 'POST':
+        elif path == "/api/restart" and method == "POST":
             # Restart device (requires auth)
-            token = headers.get('x-session')
+            token = headers.get("x-session")
             if not verify_session(token):
-                await send_response(writer, "401 Unauthorized", "application/json", '{"error":"Not authenticated"}')
+                await send_response(
+                    writer,
+                    "401 Unauthorized",
+                    "application/json",
+                    '{"error":"Not authenticated"}',
+                )
             else:
-                await send_response(writer, "200 OK", "application/json", '{"status":"restarting"}')
+                await send_response(
+                    writer, "200 OK", "application/json", '{"status":"restarting"}'
+                )
                 await writer.drain()
                 writer.close()
                 await writer.wait_closed()
                 import machine
+
                 await asyncio.sleep(0.5)  # Give time for response to be sent
                 machine.reset()
 
@@ -1157,6 +1218,7 @@ async def handle_client(reader, writer):
     except Exception as e:
         print(f"Error handling request: {e}")
         import sys
+
         sys.print_exception(e)
 
     finally:
@@ -1170,6 +1232,6 @@ async def handle_client(reader, writer):
 async def start_web_server(port=80):
     """Start the web server"""
     print(f"Starting web server on port {port}...")
-    server = await asyncio.start_server(handle_client, '0.0.0.0', port)
+    server = await asyncio.start_server(handle_client, "0.0.0.0", port)
     print(f"Web server running on http://0.0.0.0:{port}")
     return server

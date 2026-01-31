@@ -1,6 +1,6 @@
 import json
 
-SETTINGS_FILE = '/settings.json'
+SETTINGS_FILE = "/settings.json"
 
 DEFAULT_SETTINGS = {
     "WIFI_SSID": "",
@@ -24,27 +24,33 @@ DEFAULT_SETTINGS = {
     "NIGHT_END": "06:00",
     "NIGHT_DIMMING": 3,
     "PASSWORD_SALT": "e1b917a40fb57d7ee8feb37a626d7ddd",
-    "PASSWORD_HASH": "5ab4742e8e8b4cdd1b9df66879fdad290f09a45e5a8de6ce00d5e72eb4bc8048"
+    "PASSWORD_HASH": "5ab4742e8e8b4cdd1b9df66879fdad290f09a45e5a8de6ce00d5e72eb4bc8048",
 }
 
 _settings = None
+
 
 def _load():
     """Load settings from file, merging with defaults"""
     global _settings
     try:
-        with open(SETTINGS_FILE, 'r') as f:
+        with open(SETTINGS_FILE, "r") as f:
             file_settings = json.load(f)
     except:
         file_settings = {}
-    _settings = {key: file_settings.get(key, default) for key, default in DEFAULT_SETTINGS.items()}
+    _settings = {
+        key: file_settings.get(key, default)
+        for key, default in DEFAULT_SETTINGS.items()
+    }
+
 
 def _save():
     """Save current settings to file"""
-    with open(SETTINGS_FILE, 'w') as f:
-        data = json.dumps(_settings, separators=(',\n', ': '))
+    with open(SETTINGS_FILE, "w") as f:
+        data = json.dumps(_settings, separators=(",\n", ": "))
         f.write(data.replace("{", "{\n").replace("}", "\n}\n"))
     print(f"Settings saved to {SETTINGS_FILE}")
+
 
 @micropython.native
 def get(key=None):
@@ -54,6 +60,7 @@ def get(key=None):
     if key is None:
         return _settings.copy()
     return _settings.get(key, DEFAULT_SETTINGS.get(key))
+
 
 def set(key_or_dict, value=None):
     """Set one or more settings and save to file
