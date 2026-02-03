@@ -493,7 +493,7 @@ else:
     console("connected to internet")
     console("waiting for data...")
 
-shared_data = []
+shared_data = None
 safe_to_fetch = asyncio.Event()
 safe_to_fetch.set()
 
@@ -506,7 +506,7 @@ async def display_task():
     start_ms = 0
     blink = True
     print("waiting for first data")
-    while not shared_data:
+    while shared_data == None:
         await asyncio.sleep_ms(100)
     safe_to_fetch.clear()
     while True:
@@ -671,9 +671,8 @@ async def data_fetch_task():
 
                         parser_clear()
 
-                        if new_data:
-                            shared_data = new_data
-                            print("updated data")
+                        shared_data = new_data
+                        print("updated data")
                     else:
                         print("fetch failed:", response.status)
 
