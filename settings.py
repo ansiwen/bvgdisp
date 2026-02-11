@@ -5,7 +5,7 @@ SETTINGS_FILE = "/settings.json"
 DEFAULT_SETTINGS = {
     "WIFI_SSID": "",
     "WIFI_PASSWORD": "",
-    "API_URL": "https://v6.bvg.transport.rest",
+    "API_URL": "http://vbb.a6n.de",
     "FILTERED": [],
     "WALK_DELAY": 0,
     "COLORED": True,

@@ -5,183 +5,118 @@ import network
 import asyncio
 import aiohttp
 from hub75 import Hub75
-from picographics import PicoGraphics
+from picographics import PicoGraphics, DISPLAY_GENERIC, PEN_RGB888
 from font_bvg import font_small
 import settings
 import hw_conf
 import gc
+import _thread
+import json
 
-parser_departures = []
-parser_buffer = bytearray(8192)
-parser_buffer_size = 0
-parser_buffer_mv = memoryview(parser_buffer)
+_ETA_WIDTH = const(11)
 
+_TEXT_BUF_SZ = const(1024)
+_WARN_BUF_SZ = const(2048)
+_COL_GAP = const(2)
 
-def parser_clear():
-    global parser_departures, parser_buffer_size
-    parser_departures = []
-    parser_buffer_size = 0
+_S_ETA = const(0)
+_S_LINE = const(1)
+_S_DEST = const(2)
+_S_DEST_SZ = const(3)
+_S_DEST_X = const(4)
 
+_FRAME_RATE = const(25)
+_DEST_SCROLL_DELAY = const(5)
+_RENDER_DELAY_MS = const(600)
+_FETCH_DELAY = const(10)
+_WARN_DURATION = const(45)
+_WARN_PAUSE = const(30)
 
-@micropython.native
-def decode(b):
-    try:
-        s = b.decode()
-    except UnicodeError:
-        print("UnicodeError:", b)
-        s = ""
-        for c in b:
-            s += chr(c)
-    return s
+_FRAME_DELAY = const(1000//_FRAME_RATE)
+_DEST_SCROLL_INIT = const(-_FRAME_RATE*_DEST_SCROLL_DELAY)
+_WARN_CYCLE = const(_WARN_DURATION+_WARN_PAUSE)
 
-
-@micropython.native
-def parser_feed(chunk_size):
-    global parser_departures, parser_buffer, parser_buffer_size, parser_buffer_mv
-    # print("feed:", parser_buffer[0:1024])
-
-    search_offset = parser_buffer_size - 3
-    if search_offset < 0:
-        search_offset = 0
-
-    parser_buffer_size += chunk_size
-    if parser_buffer_size > 8192:
-        print("parser_buffer too small", parser_buffer_size)
-
-    end = 0
-    success = True
-
-    while True:
-        if not success:
-            print("parsing failed:", parser_buffer[0:end])
-            success = True
-        pos = parser_buffer.find(b"\n\t\t}", search_offset, parser_buffer_size)
-        if pos == -1:
-            if end:
-                parser_buffer_mv[0 : parser_buffer_size - end] = parser_buffer_mv[
-                    end:parser_buffer_size
-                ]
-                parser_buffer_size = parser_buffer_size - end
-            return
-        end = pos + 4
-        search_offset = end
-
-        pos = parser_buffer.find(b'\n\t\t\t"when": "', 0, end)
-        if pos == -1:
-            continue
-        pos += 13
-
-        success = False
-
-        nl = parser_buffer.find(b"\n", pos, end)
-        if nl == -1:
-            continue
-        when = decode(parser_buffer[pos : nl - 2])
-
-        pos = parser_buffer.find(b'\n\t\t\t"direction"', nl, end)
-        if pos == -1:
-            continue
-        pos += 18
-        nl = parser_buffer.find(b"\n", pos, end)
-        if nl == -1:
-            continue
-        direction = decode(parser_buffer[pos : nl - 2])
-
-        pos = parser_buffer.find(b'\n\t\t\t"line"', nl, end)
-        if pos == -1:
-            continue
-        pos += 13
-        pos = parser_buffer.find(b'\n\t\t\t\t"name"', pos, end)
-        if pos == -1:
-            continue
-        pos += 14
-        nl = parser_buffer.find(b"\n", pos, end)
-        if nl == -1:
-            continue
-        line = decode(parser_buffer[pos : nl - 2])
-
-        pos = parser_buffer.find(b'\n\t\t\t\t"product"', nl, end)
-        if pos == -1:
-            continue
-        pos += 17
-        nl = parser_buffer.find(b"\n", pos, end)
-        if nl == -1:
-            continue
-        product = decode(parser_buffer[pos : nl - 2])
-
-        success = True
-
-        # print("dep:", line, product, direction, when)
-        parser_departures.append((line, product, direction, when))
+# Colors as tuples (R, G, B)
+_RED = const((120, 0, 0))
+_YELLOW = const((255, 180, 0))
+_BVG = const((255, 170, 0))
+_WHITE = const((255, 255, 255))
+#_BG = _disp.create_pen(4,4,4)
+_BG = const(0)
 
 
-rtc = machine.RTC()
+_rtc = machine.RTC()
 
 # Enable the Wireless
 network.country("DE")
 network.hostname("BVGdisplay")
 
-wlan = network.WLAN(network.STA_IF)
-ap_mode = False
+_wlan = network.WLAN(network.STA_IF)
 
 # Setup for the display
-display = PicoGraphics(display=hw_conf.DISPLAY)
 
-WIDTH, HEIGHT = display.get_bounds()
+def make_disp():
+    disp = PicoGraphics(display=hw_conf.DISPLAY)
+    mv = memoryview(disp)
+    return disp, mv
 
-h75 = Hub75(WIDTH, HEIGHT, color_order=hw_conf.COLOR_ORDER)
-h75.start()
+def make_col(col_w):
+    buf = PicoGraphics(width=col_w, height=8, display=DISPLAY_GENERIC, pen_type=PEN_RGB888)
+    buf.set_pen(0)
+    buf.clear()
+    # (buf, buf_mv, lock, buf_width)
+    return (buf, memoryview(buf))
 
+_disp, _disp_mv = make_disp()
+_disp.set_pen(0)
+_disp.clear()
+_disp_width, _disp_height = _disp.get_bounds()
 
-# Colors as tuples (R, G, B)
-RED = (120, 0, 0)
-YELLOW = (255, 180, 0)
-BVG = (255, 170, 0)
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
+_warn_y = 55 if _disp_height == 64 else 24
+_row_y0 = 1 if _disp_height == 64 else 0
+_row_height = 9 if _disp_height == 64 else 8
+_n_textlines = (_warn_y - _row_y0) // _row_height + 1  # +1: last row shares the scroll position
 
-dimming = 10
+_dest_offset = int(settings.get("DEST_OFFSET"))
 
+_h75 = Hub75(_disp_width, _disp_height, color_order=hw_conf.COLOR_ORDER)
+_h75.start()
+
+_dimming = 10
 
 @micropython.native
-def set_pen(color):
-    global dimming
+def set_pen(disp, color):
     """Set pen with dimming applied. Color is (R, G, B) tuple."""
-    if dimming == 10:
-        display.set_pen(display.create_pen(*color))
-    else:
-        dimmed = tuple(v * dimming // 10 for v in color)
-        display.set_pen(display.create_pen(*dimmed))
+    dimming = _dimming
+    if dimming != 10:
+        color = tuple(v * dimming // 10 for v in color)
+    disp.set_pen(disp.create_pen(*color))
 
-
-console_y = 0
-
+_console_y = 0
 
 def console(*args, clear=False):
-    global console_y
-    set_pen(RED)
+    global _console_y
+    disp = _disp
+    set_pen(disp, _RED)
     if clear:
-        console_y = 0
-        set_pen(BLACK)
-        display.clear()
-        display
-        set_pen(RED)
+        _console_y = 0
+        disp.set_pen(0)
+        disp.clear()
+        set_pen(disp, _RED)
     str_args = [str(arg) for arg in args]
     s = " ".join(str_args)
     print(s)
-    display.text(s, 0, console_y - 1, scale=1)
-    h75.update(display)
-    console_y += 6
+    disp.text(s, 1, _console_y, scale=1)
+    _h75.update(disp)
+    _console_y += 6
 
 
 def start_ap_mode():
     """Start WiFi Access Point for configuration"""
-    global ap_mode
-    ap_mode = True
     ap = network.WLAN(network.AP_IF)
 
     # Disable station mode
-    wlan.active(False)
+    _wlan.active(False)
 
     # Enable AP mode
     ap.config(essid="BVGdisplay", security=0)  # Open network for easy setup
@@ -203,31 +138,31 @@ def start_ap_mode():
 def network_connect(SSID, PSK):
     """Try to connect to WiFi. Returns True on success, False on failure."""
     for i in range(6):
-        wlan.disconnect()
-        while wlan.active():
-            wlan.active(False)
-        while not wlan.active():
-            wlan.active(True)
+        _wlan.disconnect()
+        while _wlan.active():
+            _wlan.active(False)
+        while not _wlan.active():
+            _wlan.active(True)
         # Sets the Wireless LED pulsing and attempts to connect to your local network.
         console(f"connecting to {SSID}...", clear=True)
-        wlan.config(pm=0xA11140)  # Turn WiFi power saving off for some slow APs
-        wlan.connect(SSID, PSK)
+        _wlan.config(pm=0xA11140)  # Turn WiFi power saving off for some slow APs
+        _wlan.connect(SSID, PSK)
 
         for j in range(10):
-            print("wlan.status:", wlan.status())
-            if wlan.status() < 0 or wlan.status() >= 3:
+            print("_wlan.status:", _wlan.status())
+            if _wlan.status() < 0 or _wlan.status() >= 3:
                 break
             print("waiting for connection...")
             time.sleep(1)
 
         # Handle connection error. Switches the Warn LED on.
-        if wlan.isconnected():
+        if _wlan.isconnected():
             print("connected")
-            ip = wlan.ifconfig()[0]
+            ip = _wlan.ifconfig()[0]
             console("IP:", ip)
             return True
 
-        print("wlan.status:", wlan.status())
+        print("_wlan.status:", _wlan.status())
         console("Unable to connect.")
         console("Retrying...")
         time.sleep(2)
@@ -251,7 +186,6 @@ def connectivity_test(host="1.1.1.1", port=80, timeout=60):
         console("No Internet. Restarting...")
         time.sleep(1)
         machine.reset()
-
 
 @micropython.native
 def parse_iso_to_epoch(date_str):
@@ -314,68 +248,45 @@ def parse_http_date(date_str):
     return timestamp
 
 
-# def text_bold(txt, x, y, scale=1):
-#     for c in txt:
-#         print("printing bold ", c, " at ", x, y)
-#         display.text(c, x, y, scale=scale)
-#         #display.text(c, x+1, y, scale=scale)
-#         x += display.measure_text(c, scale)+2
-
-# def scroll_x():
-#     fb = memoryview(display)
-#     for y in range(32):
-#         c = 4*WIDTH
-#         x0 = bytes(fb[c*y:c*y+3])
-#         fb[c*y:c*(y+1)-4] = fb[c*y+4:c*(y+1)]
-#         fb[c*(y+1)-4:c*(y+1)-1] = x0
-
-
 @micropython.native
 def banner():
     import pngdec
     import random
-
-    png = pngdec.PNG(display)
+    disp, disp_mv = _disp, _disp_mv
+    img = PicoGraphics(width=128, height=64, display=DISPLAY_GENERIC, pen_type=PEN_RGB888)
+    png = pngdec.PNG(img)
     png.open_file("ansiwen128x64.png")
-    pos_y = HEIGHT // 2 - 16
+    png.decode(0, 0)
+    img_mv = memoryview(img)
+    pos_y = _disp_height // 2 - 16
+    l = _disp_width*4
+    h75 = _h75
     for y in range(33):
-        png.decode(0, pos_y, source=(0, y, 128, 32))
-        h75.update(display)
-    time.sleep_ms(200)
-    set_pen(BLACK)
-    for i in list(random.randint(0, 1) for x in range(15)):
+        disp_mv[l*pos_y:l*(pos_y+32)] = img_mv[l*y:l*(y+32)]
+        h75.update(disp)
         time.sleep_ms(20)
-        if i:
-            display.clear()
-            h75.update(display)
-        png.decode(0, pos_y, source=(0, 32, 128, 32))
-        h75.update(display)
+    time.sleep_ms(200)
+    h75.clear()
+    for i in range(0,100,5):
+        time.sleep_ms(20)
+        if random.randint(0, 100)<i:
+            h75.clear()
+            time.sleep_ms(20)
+        h75.update(disp)
+        time.sleep_ms(20)
+    blackline = b'\x00' * l
     for i in range(16):
         time.sleep_ms(10)
-        display.line(0, pos_y + i, 128, pos_y + i)
-        display.line(0, pos_y + 31 - i, 128, pos_y + 31 - i)
-        h75.update(display)
-    set_pen(WHITE)
+        disp_mv[l*(pos_y+i):l*(pos_y+i+1)] = blackline
+        disp_mv[l*(pos_y+31-i):l*(pos_y+32-i)] = blackline
+        h75.update(disp)
     pos_y += 16
-    display.line(0, pos_y, 128, pos_y)
-    set_pen(BLACK)
+    disp_mv[l*pos_y:l*(pos_y+1)] = b'\xFF\xFF\xFF\x00' * _disp_width
+    h75.update(disp)
     for i in range(64):
         time.sleep_ms(3)
-        display.pixel(i, pos_y)
-        display.pixel(127 - i, pos_y)
-        h75.update(display)
-
-
-# def normalize(a, b, c):
-#     max = a
-#     if b > max:
-#         max = b
-#     if c > max:
-#         max = c
-#     a = a*255//max
-#     b = b*255//max
-#     c = c*255//max
-#     return a, b, c
+        h75.set_pixel(i, pos_y, 0, 0, 0)
+        h75.set_pixel(127 - i, pos_y, 0, 0, 0)
 
 
 @micropython.native
@@ -411,51 +322,55 @@ def typ2col(t, l, subcol):
                 print("Unkown subway:", l)
         return (17, 93, 145)
     print("Unkown type:", t)
-    return WHITE
-
+    return _WHITE
 
 @micropython.native
-def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=False):
+def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
     if not s:
         return 0
-    cursor_x = x - skip
-    height = font_small["fontheight"]
-    last_col = [False] * (height + 2)
+    if not clip:
+        if disp:
+            clip = _disp_width
+        else:
+            clip = 0xffff
+    cursor_x = x
+    font = font_small
+    height = font["fontheight"]
+    last_col = 0
     for char in s:
         if cursor_x >= clip:
             # invisible
             break
         if bold:
-            glyph = font_small.get("*" + char)
+            glyph = font.get("*" + char)
         if not bold or glyph == None:
-            glyph = font_small.get(char)
+            glyph = font.get(char)
         if glyph is None:
+            print("missing character:", char)
             continue
         width = glyph[0] - 1
         if kerning:
             for row in range(height):
                 if bold:
-                    check = glyph[row + 1] >> width and (last_col[row + 1])
+                    check = glyph[row + 1] >> width and ((last_col & (0b10<<row)) != 0)
                 else:
-                    check = glyph[row + 1] >> width and (
-                        last_col[row] or last_col[row + 1] or last_col[row + 2]
-                    )
+                    check = glyph[row + 1] >> width and ((last_col & (0b111<<row)) != 0)
                 if check:
                     cursor_x += 1
                     break
-            last_col = [False] * (height + 2)
+            last_col = 0
         if cursor_x + width > clip:
             # don't print partial character
             break
-        if cursor_x + width <= x:
+        if cursor_x + width + 8 <= x:
             # invisible
             cursor_x += width
             continue
         for row in range(height):
             byte_val = glyph[row + 1]
             if kerning:
-                last_col[row + 1] = byte_val & 2 == 2
-            if measure:
+                last_col |= (byte_val&2)<<row
+            if not disp:
                 continue
             for col in range(width):
                 px = cursor_x + col
@@ -466,7 +381,7 @@ def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=F
                     # invisible
                     continue
                 if byte_val & (0x1 << (width - col)):
-                    display.pixel(px, y + row)
+                    disp.pixel(px, y + row)
         # Move cursor for next character
         cursor_x += width
         if not kerning:
@@ -474,150 +389,352 @@ def pprint(s, x=0, y=0, bold=False, clip=WIDTH, skip=0, measure=False, kerning=F
     return cursor_x - x
 
 
-banner()
+@micropython.viper
+def blit(dest: ptr32, src: ptr32, dst_off: uint, dst_width: uint, src_off: uint, src_width: uint, length: uint):
+    """fast copy of 8 lines from a text buffer to the display buffer"""
+    dest = ptr32(uint(dest) + dst_off*4)
+    src = ptr32(uint(src) + src_off*4)
+    src_stop = uint(0)
+    l = uint(length & uint(0xFFFFFFF8))*4
+    r = uint(length & uint(0x7))*4
+    for n in range(8):
+        src_stop = uint(src) + l
+        while uint(src) < src_stop:
+            dest[0] = src[0]
+            dest = ptr32(uint(dest) + 4)
+            src = ptr32(uint(src) + 4)
+            dest[0] = src[0]
+            dest = ptr32(uint(dest) + 4)
+            src = ptr32(uint(src) + 4)
+            dest[0] = src[0]
+            dest = ptr32(uint(dest) + 4)
+            src = ptr32(uint(src) + 4)
+            dest[0] = src[0]
+            dest = ptr32(uint(dest) + 4)
+            src = ptr32(uint(src) + 4)
+            dest[0] = src[0]
+            dest = ptr32(uint(dest) + 4)
+            src = ptr32(uint(src) + 4)
+            dest[0] = src[0]
+            dest = ptr32(uint(dest) + 4)
+            src = ptr32(uint(src) + 4)
+            dest[0] = src[0]
+            dest = ptr32(uint(dest) + 4)
+            src = ptr32(uint(src) + 4)
+            dest[0] = src[0]
+            dest = ptr32(uint(dest) + 4)
+            src = ptr32(uint(src) + 4)
+        src_stop:uint = uint(src) + r
+        while uint(src) < src_stop:
+            dest[0] = src[0]
+            dest = ptr32(uint(dest) + 4)
+            src = ptr32(uint(src) + 4)
+        dest = ptr32(uint(dest) + (dst_width-length)*4)
+        src = ptr32(uint(src) + (src_width-length)*4)
 
-set_pen(RED)
+_warn_buf  = make_col(_WARN_BUF_SZ)
+_warn_buf_lock = _thread.allocate_lock()
+_warn_msg = ""
+_warn_msg_sz = 0
 
-# Check if WiFi credentials are configured
-ssid = settings.get("WIFI_SSID")
-password = settings.get("WIFI_PASSWORD")
+def warn_msg_update(msg=None):
+    global _warn_msg, _warn_msg_sz
+    warn_buf = _warn_buf[0]
+    _warn_msg_sz = 0
+    if msg == None:
+        msg = _warn_msg
+    else:
+        if _warn_msg == msg:
+            return
+        _warn_msg = msg
+    if not msg:
+        return
+    msg_size = render_text(msg, None, kerning=True, clip=None)
+    with _warn_buf_lock:
+        warn_buf.set_pen(_BG)
+        warn_buf.clear()
+        set_pen(warn_buf, _BVG)
+        render_text(msg, warn_buf, 0, 0, kerning=True, clip=_WARN_BUF_SZ)
+        _warn_msg_sz = msg_size
+    print("updated warn message")
 
-if not ssid or ssid == "REPLACE_WITH_YOUR_SSID":
-    console("No WiFi configured", clear=True)
-    start_ap_mode()
-elif not network_connect(ssid, password):
-    console("Starting AP mode...")
-    start_ap_mode()
-else:
-    connectivity_test()
-    console("connected to internet")
-    console("waiting for data...")
+_disp_thread_stop = False
+_disp_thread_lock = _thread.allocate_lock()
 
-shared_data = None
-safe_to_fetch = asyncio.Event()
-safe_to_fetch.set()
+@micropython.native
+def display_thread():
+    print("display_thread started")
+    warn_mv = _warn_buf[1]
+    warn_buf_lock = _warn_buf_lock
+    _disp_thread_lock.acquire()
+    try:
+        # local copies of global vars to avoid lookup
+        h75 = _h75
+        disp = _disp
+        disp_mv = _disp_mv
+        disp_width = _disp_width
+        warn_y = _warn_y
+        row_y0 = _row_y0
+        row_h = _row_height
+        textlines = _textlines
+        n_textlines = _n_textlines
+        t1 = time.ticks_ms()
+        warn_x = 0
+        warn_msg_sz = 0
+        while not _disp_thread_stop:
+            dest_off = _dest_offset
+            line_width = dest_off - _COL_GAP
+            dest_width = disp_width - line_width - _ETA_WIDTH - 2*_COL_GAP
+            for i in range(n_textlines):
+                buf, mv, locks, states = textlines[i]
+                row_y = (row_y0 + i * row_h) * disp_width
+                # ETA column
+                if locks[_S_ETA].acquire(False):
+                    blit(disp_mv, mv, row_y + disp_width - _ETA_WIDTH, disp_width, 0, _TEXT_BUF_SZ, _ETA_WIDTH)
+                    locks[_S_ETA].release()
+                # LINE column
+                if locks[_S_LINE].acquire(False):
+                    blit(disp_mv, mv, row_y, disp_width, _ETA_WIDTH, _TEXT_BUF_SZ, line_width)
+                    locks[_S_LINE].release()
+                # DEST column
+                if locks[_S_DEST].acquire(False):
+                    dest_sz = states[_S_DEST_SZ]
+                    #print("i:", i, "dest_sz: ", dest_sz, "dest_width:", dest_width)
+                    if dest_sz > dest_width:
+                        dest_sz += 9
+                        x = states[_S_DEST_X]
+                        next_x = x+1
+                        if next_x == dest_sz:
+                            next_x = _DEST_SCROLL_INIT
+                        states[_S_DEST_X] = next_x
+                        if x < 0:
+                            x = 0
+                        #print("x: ", x)
+                        if x > dest_sz-dest_width:
+                            blit(disp_mv, mv, row_y + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_sz-x)
+                            blit(disp_mv, mv, row_y + dest_off + dest_sz - x, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width-dest_sz+x)
+                        else:
+                            blit(disp_mv, mv, row_y + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_width)
+                    else:
+                        blit(disp_mv, mv, row_y + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width)
+                    locks[_S_DEST].release()
+            if _warn_msg_sz:
+                warn_buf_lock.acquire()
+                warn_msg_sz = _warn_msg_sz
+                if warn_x >= warn_msg_sz:
+                    warn_x = 0
+                if warn_x > warn_msg_sz-disp_width:
+                    blit(disp_mv, warn_mv, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, warn_msg_sz-warn_x)
+                    blit(disp_mv, warn_mv, warn_y*disp_width+warn_msg_sz-warn_x, disp_width, 0, _WARN_BUF_SZ, disp_width-warn_msg_sz+warn_x)
+                else:
+                    blit(disp_mv, warn_mv, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, disp_width)
+                warn_buf_lock.release()
+                warn_x += 1
+            elif warn_msg_sz:
+                disp.rectangle(0, warn_y, disp_width, warn_y+8)
+                warn_msg_sz = 0
+            # elapsed = time.ticks_diff(time.ticks_ms(), t1)
+            # print("elapsed", elapsed)
+            # busy loop on core 2 to avoid flickering
+            t1 += _FRAME_DELAY
+            while True:
+                if time.ticks_ms() >= t1:
+                    break
+            h75.update(disp)
+    except Exception as e:
+        import sys
+        print(f"display thread failed: {e}")
+        sys.print_exception(e)
+    finally:
+        print("display thread finished")
+        _disp_thread_lock.release()
 
-display.set_font("bitmap8")
+_dep_data = None
+_safe_to_fetch = asyncio.Event()
+_safe_to_fetch.set()
 
-
-async def display_task():
-    print("display task started")
-    await asyncio.sleep_ms(500)
+async def render_task():
+    global _dest_offset, _textlines
+    print("render task started")
+    await asyncio.sleep(5) # give a chance to read the IP address
     start_ms = 0
     blink = True
+    colored = False
+    sub_colors = False
     print("waiting for first data")
-    while shared_data == None:
+    console("waiting for data...")
+    while _dep_data == None:
         await asyncio.sleep_ms(100)
-    safe_to_fetch.clear()
+    _disp.set_pen(0)
+    _disp.clear()
+    gc.collect()
+    # _textlines[row] structure: ETA|LINE|DEST
+    zero_states = ["", "", "", 0, 0]
+    _textlines = []
+    for _ in range(_n_textlines):
+        buf, mv = make_col(_TEXT_BUF_SZ)
+        _textlines.append((
+            buf, mv,
+            (_thread.allocate_lock(), _thread.allocate_lock(),_thread.allocate_lock()),
+            zero_states[:]
+        ))
+
+    _thread.start_new_thread(display_thread, ())
+    _safe_to_fetch.clear()
+    timestamp = time.ticks_ms()
     while True:
         try:
-            last_ms = start_ms
-            start_ms = time.ticks_ms()
-            delta = time.ticks_diff(start_ms, last_ms)
-            if last_ms > 0 and delta > 1050:
-                print("delta:", time.ticks_diff(start_ms, last_ms))
-
-            data = shared_data
-
-            set_pen(BLACK)
-            display.clear()
-
+            data = _dep_data
             now = time.time()
-
-            set_pen(BVG)
-
-            y = 0
-            if HEIGHT == 64:
-                y = 1
-
+            force_update = False
+            def update(old, new):
+                nonlocal force_update
+                if old != new:
+                    force_update = True
+                return new
             walk_delay = settings.get("WALK_DELAY")
-            colored = settings.get("COLORED")
-            sub_colors = settings.get("SUBWAY_COLORS")
-            dest_offset = settings.get("DEST_OFFSET")
-
-            for line, typ, dest, when in data:
-                if y > HEIGHT - 8:
+            colored = update(colored, settings.get("COLORED"))
+            sub_colors = update(sub_colors, settings.get("SUBWAY_COLORS"))
+            dest_offset = int(settings.get("DEST_OFFSET"))
+            if dest_offset != _dest_offset:
+                _dest_offset = dest_offset
+                _disp.clear()
+                force_update = True
+            line_width = dest_offset - _COL_GAP
+            i = 0
+            for line, typ, dest, when, bg_col in data:
+                if i >= _n_textlines:
                     break
 
-                # print("when", when, "now", now)
                 eta_n = when - now + 45
                 if eta_n < walk_delay:
                     continue
 
                 eta_n //= 60
 
-                # print(line, dest, eta_n)
                 if eta_n < 1:
-                    eta_s = None
-                    # eta_s = str(eta_n) + "'"
+                    eta_s = ""
                     if blink:
-                        dest = None
+                        dest = ""
                 else:
                     eta_s = str(eta_n) + "'"
-                if colored:
-                    set_pen(typ2col(typ, line, sub_colors))
-                # display.rectangle(0, y, dest_offset-2, 8)
-                # display.set_pen(BLACK)
-                dest_offset = dest_offset
-                line_size = pprint(line, 0, y, bold=True, kerning=True, measure=True)
-                pprint(line, dest_offset - line_size - 3, y, bold=True, kerning=True)
-                set_pen(BVG)
-                dest_width = WIDTH - dest_offset - pprint("30'", measure=True) - 1
-                pprint(
-                    dest, dest_offset, y, clip=dest_offset + dest_width, kerning=True
-                )
-                eta_offset = WIDTH - pprint(eta_s, measure=True) + 1
-                pprint(eta_s, eta_offset, y)
-                y += 8
-                if HEIGHT == 64:
-                    y += 1
 
-            h75.update(display)
+                line_size = render_text(line, bold=True, kerning=True)
+                eta_size = 0
+                if eta_s:
+                    eta_size = render_text(eta_s)
+
+                tl_buf, _, locks, states = _textlines[i]
+
+                # render ETA at beginning of textline buffer
+                if eta_s != states[_S_ETA]:
+                    with locks[0]:
+                        tl_buf.set_pen(_BG)
+                        tl_buf.rectangle(0, 0, _ETA_WIDTH, 8)
+                        if eta_s:
+                            set_pen(tl_buf, _BVG)
+                            render_text(eta_s, tl_buf, _ETA_WIDTH - eta_size + 1, 0, clip=_ETA_WIDTH)
+                        states[_S_ETA] = eta_s
+                        print(f"updated ETA of line {i}")
+
+                # then render LINE
+                if line != states[_S_LINE] or force_update:
+                    with locks[1]:
+                        tl_buf.set_pen(_BG)
+                        tl_buf.rectangle(_ETA_WIDTH, 0, line_width, 8)
+                        if sub_colors and bg_col:
+                            set_pen(tl_buf, bg_col)
+                        elif colored:
+                            set_pen(tl_buf, typ2col(typ, line, sub_colors))
+                        else:
+                            set_pen(tl_buf, _BVG)
+                        render_text(line, tl_buf, _ETA_WIDTH + line_width - line_size, 0, bold=True, kerning=True)
+                        states[_S_LINE] = line
+                        print(f"updated LINE of line {i}")
+
+                # last is DEST, because it has flexible length
+                if dest != states[_S_DEST] or force_update:
+                    with locks[2]:
+                        tl_buf.set_pen(_BG)
+                        tl_buf.rectangle(_ETA_WIDTH + line_width, 0, _TEXT_BUF_SZ - _ETA_WIDTH - line_width, 8)
+                        set_pen(tl_buf, _BVG)
+                        states[_S_DEST_SZ] = render_text(dest, tl_buf, _ETA_WIDTH + line_width, 0, clip=_TEXT_BUF_SZ - _ETA_WIDTH - line_width, kerning=True)
+                        states[_S_DEST] = dest
+                        states[_S_DEST_X] = _DEST_SCROLL_INIT
+                        print(f"updated DEST of line {i}")
+                i += 1
+
+            # Clear any unused rows
+            for j in range(i, _n_textlines):
+                disp, _, locks, states = _textlines[j]
+                for lock in locks:
+                    lock.acquire()
+                disp.set_pen(_BG)
+                disp.clear()
+                states[:] = zero_states[:]
+                for lock in locks:
+                    lock.release()
+
         except Exception as e:
             import sys
 
-            print(f"Display task failed: {e}")
+            print(f"render task failed: {e}")
             sys.print_exception(e)
             print("last data:", data)
         # print("---")
         blink = not blink
 
         # Signal fetch task: "I'm done, safe to run now"
-        safe_to_fetch.set()  # Wake up fetch task
+        _safe_to_fetch.set()  # Wake up fetch task
         await asyncio.sleep_ms(0)  # Yield to let fetch see signal
-        safe_to_fetch.clear()  # Clear immediately (edge-trigger)
+        _safe_to_fetch.clear()  # Clear immediately (edge-trigger)
+        timestamp += _RENDER_DELAY_MS
+        delay = time.ticks_diff(timestamp, time.ticks_ms())
+        #print("render delay:", delay)
+        if delay > 0:
+            await asyncio.sleep_ms(delay)
+        else:
+            print("render_task took too long:", delay)
+            timestamp -= delay
 
-        elapsed_ms = time.ticks_diff(time.ticks_ms(), start_ms)
-        await asyncio.sleep_ms(max(1, 1000 - elapsed_ms))
+_time_set = False
 
-
-time_set = False
-
+@micropython.native
+def parse_color(s):
+    if not s:
+        return None
+    s = s[1:]  # strip '#'
+    if len(s) == 3:
+        r, g, b = (int(c, 16) * 0x11 for c in s)
+    else:
+        r, g, b = int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+    return (r, g, b)
 
 async def data_fetch_task():
     """Fetches data every 10 seconds"""
-    global shared_data, parser_departures, time_set
+    global _dep_data, _time_set
     print("fetch task started")
-    await asyncio.sleep(5)  # give chance to read IP address
+    current_warn_id = 0
     while True:
         try:
-            await safe_to_fetch.wait()
+            await _safe_to_fetch.wait()
             gc.collect()
             # print("fetching data")
             params = {
                 "results": "14",
                 "duration": "60",
                 "pretty": "true",
-                "bus": "true" if settings.get("SHOW_BUS") else "false",
-                "tram": "true" if settings.get("SHOW_TRAM") else "false",
-                "subway": "true" if settings.get("SHOW_SUBWAY") else "false",
-                "regional": "true" if settings.get("SHOW_REGIONAL") else "false",
-                "suburban": "true" if settings.get("SHOW_SUBURBAN") else "false",
-                "ferry": "true" if settings.get("SHOW_FERRY") else "false",
-                "express": "true" if settings.get("SHOW_EXPRESS") else "false",
+                "sparse": "true",
+                "language": "de",
             }
-            if time_set:
-                params["when"] = time.time() + settings.get("WALK_DELAY")
+            if not settings.get("SHOW_BUS"): params["bus"] = "false"
+            if not settings.get("SHOW_TRAM"): params["tram"] = "false"
+            if not settings.get("SHOW_SUBWAY"): params["subway"] = "false"
+            if not settings.get("SHOW_REGIONAL"): params["regional"] = "false"
+            if not settings.get("SHOW_SUBURBAN"): params["suburban"] = "false"
+            if not settings.get("SHOW_FERRY"): params["ferry"] = "false"
+            if not settings.get("SHOW_EXPRESS"): params["express"] = "false"
+            if _time_set: params["when"] = str(time.time() + int(settings.get("WALK_DELAY")))
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f'{settings.get("API_URL")}/stops/{settings.get("STATION_ID")}/departures',
@@ -627,28 +744,20 @@ async def data_fetch_task():
                     if response.status == 200:
                         date = parse_http_date(response.headers["Date"])
                         old_t = time.time()
-                        rtc.datetime(date)
-                        if time_set:
+                        _rtc.datetime(date)
+                        if _time_set:
                             diff = time.time() - old_t
                             if diff < -1 or diff > 1:
                                 print("time diff:", diff)
 
-                        if not time_set:
-                            time_set = True
+                        if not _time_set:
+                            _time_set = True
                             print("time set")
                             continue
 
                         parse_start_ms = time.ticks_ms()
                         # Stream parse JSON response
-                        while True:
-                            size = await response.content.readinto(
-                                parser_buffer_mv[
-                                    parser_buffer_size : parser_buffer_size + 1024
-                                ]
-                            )
-                            if not size:
-                                break
-                            parser_feed(size)
+                        data = await response.json()
                         print(
                             "parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms)
                         )
@@ -656,22 +765,49 @@ async def data_fetch_task():
                         # Process parsed departures
                         new_data = []
                         filtered = settings.get("FILTERED")
-                        for line, typ, dest, when_str in parser_departures:
+                        for dep in data["departures"]:
+                            when = dep["when"]
+                            if not when:
+                                continue
+                            when = parse_iso_to_epoch(when)
+                            line_obj = dep["line"]
+                            line = line_obj["name"]
                             if line in filtered:
                                 continue
-                            when = parse_iso_to_epoch(when_str)
+                            typ = line_obj["product"]
                             # Clean up destination
-                            dest = dest.split(", ")[-1]
+                            dest = dep["direction"].split(", ")[-1]
                             dest = dest.replace("[Endstelle]", "")
                             dest = dest.replace("(Berlin)", "")
                             dest = dest.replace("  ", " ")
                             dest = dest.strip()
+                            bg = parse_color(line_obj.get("color", {}).get("bg"))
 
-                            new_data.append((line, typ, dest, when))
-
-                        parser_clear()
-
-                        shared_data = new_data
+                            new_data.append((line, typ, dest, when, bg))
+                        # new_data[1] = (new_data[1][0], new_data[1][1], "S+U Zoologischer Garten", new_data[1][3], new_data[1][4])
+                        _dep_data = new_data
+                        warn_id = 0
+                        warn_msg = ""
+                        prio_min = 100
+                        if (time.time() % _WARN_CYCLE) > _WARN_PAUSE:
+                            for warn in data["warnings"]:
+                                #print("warn:", warn)
+                                now = time.time()
+                                prio = warn["priority"]
+                                if (prio >= prio_min
+                                        and now >= parse_iso_to_epoch(warn["validFrom"])
+                                        and now <= parse_iso_to_epoch(warn["validUntil"])):
+                                    warn_id = warn["id"]
+                                    summary = warn["summary"]
+                                    text = warn["text"].split("\n")[0]
+                                    warn_msg = f'{summary}: {text} *** '
+                                    prio_min = prio+1
+                            # if not warn_id:
+                            #     warn_id = 99
+                            #     warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
+                        if warn_id != current_warn_id:
+                            current_warn_id = warn_id
+                            warn_msg_update(warn_msg)
                         print("updated data")
                     else:
                         print("fetch failed:", response.status)
@@ -684,7 +820,7 @@ async def data_fetch_task():
 
         print("memfree:", gc.mem_free())
         # print("fetch finished")
-        await asyncio.sleep(10)
+        await asyncio.sleep(_FETCH_DELAY)
 
 
         # print("waiting for finished display")
@@ -692,17 +828,15 @@ async def data_fetch_task():
 
 async def check_night_time_task():
     """Check if current time is within night hours"""
-    global dimming, time_set
-    while not time_set:
+    global _dimming, _time_set
+    while not _time_set:
         await asyncio.sleep(1)
     while True:
         print("check_night_time")
-        now = rtc.datetime()
+        now = _rtc.datetime()
         # RTC is UTC, apply timezone offset
         tz_offset = settings.get("TIMEZONE") or 0
-        current_minutes = (now[4] + tz_offset) * 60 + now[
-            5
-        ]  # (hours + tz) * 60 + minutes
+        current_minutes = (now[4] + tz_offset) * 60 + now[5]  # (hours + tz) * 60 + minutes
         # Normalize to 0-1439 range (24 hours = 1440 minutes)
         current_minutes = current_minutes % 1440 + 1
 
@@ -715,24 +849,43 @@ async def check_night_time_task():
         start_minutes = start_h * 60 + start_m
         end_minutes = end_h * 60 + end_m
 
-        if start_minutes <= end_minutes:
-            # Same day range (e.g., 08:00 to 18:00)
-            if start_minutes <= current_minutes < end_minutes:
-                dimming = settings.get("NIGHT_DIMMING")
-            else:
-                dimming = 10
-        else:
-            # Overnight range (e.g., 22:00 to 06:00)
-            if current_minutes >= start_minutes or current_minutes < end_minutes:
-                dimming = settings.get("NIGHT_DIMMING")
-            else:
-                dimming = 10
-        await asyncio.sleep(85 - (now[6] + 30) % 60)
+        since_start = (current_minutes-start_minutes)%(24*60)
+        since_end = (current_minutes-end_minutes)%(24*60)
 
+        if since_start < since_end:
+            dim = int(settings.get("NIGHT_DIMMING"))
+        else:
+            dim = 10
+
+        if _dimming != dim:
+            print("changing dimming")
+            _dimming = dim
+            warn_msg_update()
+
+        await asyncio.sleep(85 - (now[6] + 30) % 60)
 
 # Main entry point
 async def main():
     from web_server import start_web_server
+
+    banner()
+
+    # Check if WiFi credentials are configured
+    ssid = settings.get("WIFI_SSID")
+    password = settings.get("WIFI_PASSWORD")
+    ap_mode = False
+
+    if not ssid or ssid == "REPLACE_WITH_YOUR_SSID":
+        console("No WiFi configured", clear=True)
+        start_ap_mode()
+        ap_mode = True
+    elif not network_connect(ssid, password):
+        console("Starting AP mode...")
+        start_ap_mode()
+        ap_mode = True
+    else:
+        connectivity_test()
+        console("connected to internet")
 
     # Start web server for settings configuration
     web_server = await start_web_server(port=80)
@@ -743,14 +896,18 @@ async def main():
     else:
         # Normal mode: run data fetcher and display
         fetcher = asyncio.create_task(data_fetch_task())
-        display_t = asyncio.create_task(display_task())
-        check_night_time = asyncio.create_task(check_night_time_task())
-        await asyncio.gather(fetcher, display_t, check_night_time)
+        renderer = asyncio.create_task(render_task())
+        night_time_checker = asyncio.create_task(check_night_time_task())
+        await asyncio.gather(fetcher, renderer, night_time_checker)
 
     web_server.close()
 
-
 # Start the event loop
-asyncio.run(main())
-
-machine.reset()
+try:
+    asyncio.run(main())
+finally:
+    print("shutting down")
+    _h75.stop()
+    _disp_thread_stop = True
+    _disp_thread_lock.acquire()
+    _disp_thread_lock.release()
