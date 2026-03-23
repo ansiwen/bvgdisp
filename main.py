@@ -253,12 +253,17 @@ def banner():
     import pngdec
     import random
     disp, disp_mv = _disp, _disp_mv
+    pos_y = _disp_height // 2 - 16
     img = PicoGraphics(width=128, height=64, display=DISPLAY_GENERIC, pen_type=PEN_RGB888)
+    img_mv = memoryview(img)
     png = pngdec.PNG(img)
     png.open_file("ansiwen128x64.png")
     png.decode(0, 0)
-    img_mv = memoryview(img)
-    pos_y = _disp_height // 2 - 16
+    bvg = PicoGraphics(display=hw_conf.DISPLAY)
+    bvg_mv = memoryview(bvg)
+    png2 = pngdec.PNG(bvg)
+    png2.open_file("bvg_logo_32.png")
+    png2.decode(46, pos_y)
     l = _disp_width*4
     h75 = _h75
     for y in range(33):
@@ -267,22 +272,22 @@ def banner():
         time.sleep_ms(20)
     time.sleep_ms(200)
     h75.clear()
-    for i in range(0,100,5):
-        time.sleep_ms(20)
+    for i in range(0,100, 2):
         if random.randint(0, 100)<i:
-            h75.clear()
-            time.sleep_ms(20)
-        h75.update(disp)
-        time.sleep_ms(20)
+            h75.update(bvg)
+        else:
+            h75.update(disp)
+        time.sleep_ms(30)
+    time.sleep_ms(700)
     blackline = b'\x00' * l
     for i in range(16):
         time.sleep_ms(10)
-        disp_mv[l*(pos_y+i):l*(pos_y+i+1)] = blackline
-        disp_mv[l*(pos_y+31-i):l*(pos_y+32-i)] = blackline
-        h75.update(disp)
+        bvg_mv[l*(pos_y+i):l*(pos_y+i+1)] = blackline
+        bvg_mv[l*(pos_y+31-i):l*(pos_y+32-i)] = blackline
+        h75.update(bvg)
     pos_y += 16
-    disp_mv[l*pos_y:l*(pos_y+1)] = b'\xFF\xFF\xFF\x00' * _disp_width
-    h75.update(disp)
+    bvg_mv[l*pos_y:l*(pos_y+1)] = b'\xFF\xFF\xFF\x00' * _disp_width
+    h75.update(bvg)
     for i in range(64):
         time.sleep_ms(3)
         h75.set_pixel(i, pos_y, 0, 0, 0)
