@@ -11,7 +11,6 @@ DEFAULT_SETTINGS = {
     "COLORED": True,
     "SUBWAY_COLORS": True,
     "STATION_ID": 900100003,
-    "DEST_OFFSET": 23,
     "SHOW_BUS": True,
     "SHOW_TRAM": True,
     "SHOW_SUBWAY": True,
@@ -28,7 +27,7 @@ DEFAULT_SETTINGS = {
 }
 
 _settings = None
-
+_updated = False
 
 def _load():
     """Load settings from file, merging with defaults"""
@@ -69,6 +68,7 @@ def set(key_or_dict, value=None):
         set('WIFI_SSID', 'my_network')
         set({'WIFI_SSID': 'my_network', 'WIFI_PASSWORD': 'secret'})
     """
+    global _updated
     if _settings is None:
         _load()
 
@@ -81,3 +81,11 @@ def set(key_or_dict, value=None):
             _settings[key_or_dict] = value
 
     _save()
+    _updated = True
+
+def check():
+    global _updated
+    if _updated:
+        _updated = False
+        return True
+    return False

@@ -409,12 +409,6 @@ HTML_PAGE = """<!DOCTYPE html>
                     <div class="small-text">Time in seconds to walk to the station</div>
                 </div>
 
-                <div class="form-group">
-                    <label for="dest-offset">Destination Offset (pixels)</label>
-                    <input type="number" id="dest-offset" name="DEST_OFFSET" min="0" step="1" required>
-                    <div class="small-text">Horizontal offset where destination text starts</div>
-                </div>
-
                 <h2 style="margin-top: 20px;">Night Dimming</h2>
                 <div class="form-group">
                     <label for="timezone">Timezone (UTC offset)</label>
@@ -730,7 +724,6 @@ HTML_PAGE = """<!DOCTYPE html>
                 document.getElementById('station-id').value = settings.STATION_ID || '900100003';
                 document.getElementById('selected-station-id').textContent = settings.STATION_ID || 'None';
                 document.getElementById('walk-delay').value = settings.WALK_DELAY || 0;
-                document.getElementById('dest-offset').value = settings.DEST_OFFSET || 20;
                 document.getElementById('show-bus').checked = settings.SHOW_BUS !== false;
                 document.getElementById('show-tram').checked = settings.SHOW_TRAM !== false;
                 document.getElementById('show-subway').checked = settings.SHOW_SUBWAY !== false;
@@ -859,7 +852,6 @@ HTML_PAGE = """<!DOCTYPE html>
                 STATION_ID: parseInt(document.getElementById('station-id').value),
                 FILTERED: filtered,
                 WALK_DELAY: parseInt(document.getElementById('walk-delay').value),
-                DEST_OFFSET: parseInt(document.getElementById('dest-offset').value),
                 SHOW_BUS: document.getElementById('show-bus').checked,
                 SHOW_TRAM: document.getElementById('show-tram').checked,
                 SHOW_SUBWAY: document.getElementById('show-subway').checked,

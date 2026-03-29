@@ -15,9 +15,9 @@ import json
 
 _ETA_WIDTH = const(11)
 
-_TEXT_BUF_SZ = const(1024)
-_WARN_BUF_SZ = const(2048)
-_COL_GAP = const(2)
+_TEXT_BUF_SZ = const(512)
+_WARN_BUF_SZ = const(2024)
+_COL_GAP = const(3)
 
 _S_ETA = const(0)
 _S_LINE = const(1)
@@ -35,6 +35,7 @@ _WARN_PAUSE = const(30)
 _FRAME_DELAY = const(1000//_FRAME_RATE)
 _DEST_SCROLL_INIT = const(-_FRAME_RATE*_DEST_SCROLL_DELAY)
 _WARN_CYCLE = const(_WARN_DURATION+_WARN_PAUSE)
+_LINE_MIN_WIDTH = const(13)
 
 # Colors as tuples (R, G, B)
 _RED = const((120, 0, 0))
@@ -77,7 +78,7 @@ _row_y0 = 1 if _disp_height == 64 else 0
 _row_height = 9 if _disp_height == 64 else 8
 _n_textlines = (_warn_y - _row_y0) // _row_height + 1  # +1: last row shares the scroll position
 
-_dest_offset = int(settings.get("DEST_OFFSET"))
+_dest_offset = 0
 
 _h75 = Hub75(_disp_width, _disp_height, color_order=hw_conf.COLOR_ORDER)
 _h75.start()
@@ -335,7 +336,7 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
         return 0
     if not clip:
         if disp:
-            clip = _disp_width
+            clip = disp.get_bounds()[0]
         else:
             clip = 0xffff
     cursor_x = x
@@ -364,9 +365,9 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
                     cursor_x += 1
                     break
             last_col = 0
-        if cursor_x + width > clip:
-            # don't print partial character
-            break
+        # if cursor_x + width > clip:
+        #     # don't print partial character
+        #     break
         if cursor_x + width + 8 <= x:
             # invisible
             cursor_x += width
@@ -436,11 +437,6 @@ def blit(dest: ptr32, src: ptr32, dst_off: uint, dst_width: uint, src_off: uint,
             src = ptr32(uint(src) + 4)
         dest = ptr32(uint(dest) + (dst_width-length)*4)
         src = ptr32(uint(src) + (src_width-length)*4)
-
-_warn_buf  = make_col(_WARN_BUF_SZ)
-_warn_buf_lock = _thread.allocate_lock()
-_warn_msg = ""
-_warn_msg_sz = 0
 
 def warn_msg_update(msg=None):
     global _warn_msg, _warn_msg_sz
@@ -587,6 +583,7 @@ async def render_task():
     _thread.start_new_thread(display_thread, ())
     _safe_to_fetch.clear()
     timestamp = time.ticks_ms()
+    line_size_max = _LINE_MIN_WIDTH
     while True:
         try:
             data = _dep_data
@@ -600,12 +597,13 @@ async def render_task():
             walk_delay = settings.get("WALK_DELAY")
             colored = update(colored, settings.get("COLORED"))
             sub_colors = update(sub_colors, settings.get("SUBWAY_COLORS"))
-            dest_offset = int(settings.get("DEST_OFFSET"))
-            if dest_offset != _dest_offset:
-                _dest_offset = dest_offset
+            if settings.check():
+                line_size_max = _LINE_MIN_WIDTH
+            if _dest_offset != line_size_max + _COL_GAP:
+                _dest_offset = line_size_max + _COL_GAP
                 _disp.clear()
                 force_update = True
-            line_width = dest_offset - _COL_GAP
+            line_width = line_size_max
             i = 0
             for line, typ, dest, when, bg_col in data:
                 if i >= _n_textlines:
@@ -625,6 +623,8 @@ async def render_task():
                     eta_s = str(eta_n) + "'"
 
                 line_size = render_text(line, bold=True, kerning=True)
+                line_size_max = max(line_size_max, line_size)
+                line_offset = max(line_width - line_size, 0)
                 eta_size = 0
                 if eta_s:
                     eta_size = render_text(eta_s)
@@ -653,7 +653,7 @@ async def render_task():
                             set_pen(tl_buf, typ2col(typ, line, sub_colors))
                         else:
                             set_pen(tl_buf, _BVG)
-                        render_text(line, tl_buf, _ETA_WIDTH + line_width - line_size, 0, bold=True, kerning=True)
+                        render_text(line, tl_buf, _ETA_WIDTH + line_offset, 0, bold=True, clip=_ETA_WIDTH+line_width, kerning=True)
                         states[_S_LINE] = line
                         print(f"updated LINE of line {i}")
 
@@ -873,8 +873,6 @@ async def check_night_time_task():
 async def main():
     from web_server import start_web_server
 
-    banner()
-
     # Check if WiFi credentials are configured
     ssid = settings.get("WIFI_SSID")
     password = settings.get("WIFI_PASSWORD")
@@ -906,6 +904,14 @@ async def main():
         await asyncio.gather(fetcher, renderer, night_time_checker)
 
     web_server.close()
+
+
+banner()
+
+_warn_buf  = make_col(_WARN_BUF_SZ)
+_warn_buf_lock = _thread.allocate_lock()
+_warn_msg = ""
+_warn_msg_sz = 0
 
 # Start the event loop
 try:
