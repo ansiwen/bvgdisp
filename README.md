@@ -2,7 +2,7 @@
 
 A real-time Berlin public transport (BVG) departure display built with a Raspberry Pi Pico W and HUB75 LED matrix panel. Shows upcoming departures with line numbers, destinations, and minutes until arrival in the distinctive BVG style.
 
-![Display Example](bvgdisp.jpg)
+![Display Example](pics/bvgdisp.jpg)
 
 ## Features
 
@@ -59,31 +59,39 @@ This project requires **Pimoroni MicroPython** (not standard MicroPython) as it 
 
 1. Flash the Pimoroni MicroPython firmware (see above)
 
-2. Copy the following files to the Pico:
-   ```
-   main.py
-   web_server.py
-   settings.py
-   hw_conf.py
-   font_bvg.py
-   ansiwen128x64.png
-   lib/aiohttp/          (directory)
-   ```
+2. Copy the the `src` directory to the Pico root directory:
 
 3. Use a tool like [Thonny](https://thonny.org/), [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html), or [rshell](https://github.com/dhylands/rshell) to copy files.
 
    Example with mpremote:
    ```bash
-   mpremote cp main.py :
-   mpremote cp web_server.py :
-   mpremote cp settings.py :
-   mpremote cp hw_conf.py :
-   mpremote cp font_bvg.py :
-   mpremote cp ansiwen128x64.png :
-   mpremote cp -r lib :
+   mpremote cp -r src :
    ```
 
 ## Configuration
+
+### Hardware Configuration
+
+Edit `hw_conf.py` to match your display:
+
+```python
+from hub75 import COLOR_ORDER_RGB, COLOR_ORDER_RBG
+from picographics import DISPLAY_INTERSTATE75_128X32, DISPLAY_INTERSTATE75_128X64
+
+# Select your display size
+DISPLAY = DISPLAY_INTERSTATE75_128X32
+# DISPLAY = DISPLAY_INTERSTATE75_128X64
+
+# Adjust if colors appear wrong (RGB vs RBG panels)
+COLOR_ORDER = COLOR_ORDER_RGB
+# COLOR_ORDER = COLOR_ORDER_RBG
+```
+
+Available display options:
+- `DISPLAY_INTERSTATE75_128X32`
+- `DISPLAY_INTERSTATE75_128X64`
+- `DISPLAY_INTERSTATE75_192X64`
+- `DISPLAY_INTERSTATE75_256X64`
 
 ### Initial Setup (Access Point Mode)
 
@@ -110,29 +118,6 @@ Settings available:
 - **Colored Display** - Show transport type colors
 - **Subway Line Colors** - Use authentic U-Bahn line colors (U1=green, U2=orange, etc.)
 
-### Hardware Configuration
-
-Edit `hw_conf.py` to match your display:
-
-```python
-from hub75 import COLOR_ORDER_RGB, COLOR_ORDER_RBG
-from picographics import DISPLAY_INTERSTATE75_128X32, DISPLAY_INTERSTATE75_128X64
-
-# Select your display size
-DISPLAY = DISPLAY_INTERSTATE75_128X32
-# DISPLAY = DISPLAY_INTERSTATE75_128X64
-
-# Adjust if colors appear wrong (RGB vs RBG panels)
-COLOR_ORDER = COLOR_ORDER_RGB
-# COLOR_ORDER = COLOR_ORDER_RBG
-```
-
-Available display options:
-- `DISPLAY_INTERSTATE75_128X32`
-- `DISPLAY_INTERSTATE75_128X64`
-- `DISPLAY_INTERSTATE75_192X64`
-- `DISPLAY_INTERSTATE75_256X64`
-
 ## Settings File
 
 Settings are stored in `/settings.json` on the device. Default values:
@@ -145,7 +130,6 @@ Settings are stored in `/settings.json` on the device. Default values:
   "STATION_ID": 900100003,
   "FILTERED": [],
   "WALK_DELAY": 0,
-  "DEST_OFFSET": 23,
   "COLORED": true,
   "SUBWAY_COLORS": true,
   "SHOW_BUS": true,
