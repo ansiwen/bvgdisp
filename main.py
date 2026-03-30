@@ -43,9 +43,8 @@ _RED = const((120, 0, 0))
 _YELLOW = const((255, 180, 0))
 _BVG = const((255, 170, 0))
 _WHITE = const((255, 255, 255))
-#_BG = _disp.create_pen(4,4,4)
+#_BG = const((4 << 16) + (4 << 8) + 4)
 _BG = const(0)
-
 
 _rtc = machine.RTC()
 
@@ -491,7 +490,10 @@ def display_thread():
         warn_x = 0
         warn_msg_sz = 0
         blink_hide = False
+        dest_off = 0
+        disp.set_pen(0)
         while not _disp_thread_stop:
+            disp.clear()
             dest_off = _dest_offset
             line_width = dest_off - _COL_GAP
             dest_width = disp_width - line_width - _ETA_WIDTH - 2*_COL_GAP
@@ -584,8 +586,6 @@ async def render_task():
     console("waiting for data...")
     while _dep_data == None:
         await asyncio.sleep_ms(100)
-    _disp.set_pen(0)
-    _disp.clear()
     gc.collect()
     # _textlines[row] structure: ETA|LINE|DEST
     zero_states = ["", "", "", 0, 0, False]
@@ -620,7 +620,6 @@ async def render_task():
             dest_offset = line_size_max + _COL_GAP
             if _dest_offset != dest_offset:
                 _dest_offset = dest_offset
-                _disp.clear()
                 force_update = True
             line_width = line_size_max
             i = 0
