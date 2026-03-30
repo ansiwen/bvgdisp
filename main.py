@@ -465,6 +465,9 @@ def warn_msg_update(msg=None):
 _disp_thread_stop = False
 _disp_thread_lock = _thread.allocate_lock()
 
+_separator = " - "
+_separator_sz = render_text(_separator, kerning=True)
+
 @micropython.native
 def display_thread():
     print("display_thread started")
@@ -482,6 +485,7 @@ def display_thread():
         row_h = _row_height
         textlines = _textlines
         n_textlines = _n_textlines
+        separator_sz = _separator_sz
         t1 = time.ticks_ms()
         t_blink = t1
         warn_x = 0
@@ -509,10 +513,10 @@ def display_thread():
                     #print("i:", i, "dest_sz: ", dest_sz, "dest_width:", dest_width)
                     show = True
                     if states[_S_BLINKING] and blink_hide:
-                        disp.rectangle(dest_off, row_y, dest_width, row_y+8)
+                        disp.rectangle(dest_off, row_y, dest_width, 8)
                         show = False
                     if dest_sz > dest_width:
-                        dest_sz += 9
+                        dest_sz += min(separator_sz, _TEXT_BUF_SZ - _ETA_WIDTH - line_width - dest_sz)
                         x = states[_S_DEST_X]
                         next_x = x+1
                         if next_x == dest_sz:
@@ -528,7 +532,8 @@ def display_thread():
                             else:
                                 blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_width)
                     elif show:
-                        blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width)
+                        disp.rectangle(dest_off, row_y, dest_width, 8)
+                        blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_sz)
                     locks[_S_DEST].release()
             if _warn_msg_sz:
                 warn_buf_lock.acquire()
@@ -543,7 +548,7 @@ def display_thread():
                 warn_buf_lock.release()
                 warn_x += 1
             elif warn_msg_sz:
-                disp.rectangle(0, warn_y, disp_width, warn_y+8)
+                disp.rectangle(0, warn_y, disp_width, 8)
                 warn_msg_sz = 0
             if t1 > t_blink:
                 t_blink += _BLINK_DELAY_MS
@@ -612,8 +617,9 @@ async def render_task():
             sub_colors = update(sub_colors, settings.get("SUBWAY_COLORS"))
             if settings.check():
                 line_size_max = _LINE_MIN_WIDTH
-            if _dest_offset != line_size_max + _COL_GAP:
-                _dest_offset = line_size_max + _COL_GAP
+            dest_offset = line_size_max + _COL_GAP
+            if _dest_offset != dest_offset:
+                _dest_offset = dest_offset
                 _disp.clear()
                 force_update = True
             line_width = line_size_max
@@ -678,7 +684,7 @@ async def render_task():
                         tl_buf.set_pen(_BG)
                         tl_buf.rectangle(_ETA_WIDTH + line_width, 0, _TEXT_BUF_SZ - _ETA_WIDTH - line_width, 8)
                         set_pen(tl_buf, _BVG)
-                        states[_S_DEST_SZ] = render_text(dest, tl_buf, _ETA_WIDTH + line_width, 0, clip=_TEXT_BUF_SZ - _ETA_WIDTH - line_width, kerning=True)
+                        states[_S_DEST_SZ] = render_text(dest + _separator, tl_buf, _ETA_WIDTH + line_width, 0, clip=_TEXT_BUF_SZ - _ETA_WIDTH - line_width, kerning=True) - _separator_sz
                         states[_S_DEST] = dest
                         reset_dest_x.append(i)
                         print(f"updated DEST of line {i}")
@@ -804,9 +810,9 @@ async def data_fetch_task():
                                 continue
                             typ = line_obj["product"]
                             # Clean up destination
-                            dest = dep["direction"].split(", ")[-1]
-                            dest = dest.replace("[Endstelle]", "")
-                            dest = dest.replace("(Berlin)", "")
+                            dest = dep["direction"] #.split(", ")[-1]
+                            dest = dest.replace(" [Endstelle]", "")
+                            dest = dest.replace(" (Berlin)", "")
                             dest = dest.replace("  ", " ")
                             dest = dest.strip()
                             bg = parse_color(line_obj.get("color", {}).get("bg"))
@@ -828,6 +834,9 @@ async def data_fetch_task():
                                     warn_id = warn["id"]
                                     summary = warn["summary"]
                                     text = warn["text"].split("\n")[0]
+                                    text = text.replace(" [Endstelle]", "")
+                                    text = text.replace(" (Berlin)", "")
+                                    text = text.replace("  ", " ")
                                     warn_msg = f'{summary}: {text} *** '
                                     prio_min = prio+1
                             # if not warn_id:
