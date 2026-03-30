@@ -16,7 +16,7 @@ import json
 _ETA_WIDTH = const(11)
 
 _TEXT_BUF_SZ = const(512)
-_WARN_BUF_SZ = const(2024)
+_WARN_BUF_SZ = const(2560)
 _COL_GAP = const(3)
 
 _S_ETA = const(0)
@@ -451,12 +451,14 @@ def warn_msg_update(msg=None):
     if not msg:
         return
     msg_size = render_text(msg, None, kerning=True, clip=None)
+    if msg_size > _WARN_BUF_SZ:
+        print("WARNING: warn message too large:", msg_size)
     with _warn_buf_lock:
         warn_buf.set_pen(_BG)
         warn_buf.clear()
         set_pen(warn_buf, _BVG)
         render_text(msg, warn_buf, 0, 0, kerning=True, clip=_WARN_BUF_SZ)
-        _warn_msg_sz = msg_size
+        _warn_msg_sz = min(msg_size, _WARN_BUF_SZ)
     print("updated warn message")
 
 _disp_thread_stop = False
@@ -605,6 +607,7 @@ async def render_task():
                 force_update = True
             line_width = line_size_max
             i = 0
+            reset_dest_x = []
             for line, typ, dest, when, bg_col in data:
                 if i >= _n_textlines:
                     break
@@ -633,7 +636,7 @@ async def render_task():
 
                 # render ETA at beginning of textline buffer
                 if eta_s != states[_S_ETA]:
-                    with locks[0]:
+                    with locks[_S_ETA]:
                         tl_buf.set_pen(_BG)
                         tl_buf.rectangle(0, 0, _ETA_WIDTH, 8)
                         if eta_s:
@@ -644,7 +647,7 @@ async def render_task():
 
                 # then render LINE
                 if line != states[_S_LINE] or force_update:
-                    with locks[1]:
+                    with locks[_S_LINE]:
                         tl_buf.set_pen(_BG)
                         tl_buf.rectangle(_ETA_WIDTH, 0, line_width, 8)
                         if sub_colors and bg_col:
@@ -659,15 +662,25 @@ async def render_task():
 
                 # last is DEST, because it has flexible length
                 if dest != states[_S_DEST] or force_update:
-                    with locks[2]:
+                    with locks[_S_DEST]:
                         tl_buf.set_pen(_BG)
                         tl_buf.rectangle(_ETA_WIDTH + line_width, 0, _TEXT_BUF_SZ - _ETA_WIDTH - line_width, 8)
                         set_pen(tl_buf, _BVG)
                         states[_S_DEST_SZ] = render_text(dest, tl_buf, _ETA_WIDTH + line_width, 0, clip=_TEXT_BUF_SZ - _ETA_WIDTH - line_width, kerning=True)
                         states[_S_DEST] = dest
-                        states[_S_DEST_X] = _DEST_SCROLL_INIT
+                        reset_dest_x.append(i)
                         print(f"updated DEST of line {i}")
                 i += 1
+
+            for j in reset_dest_x:
+                locks = _textlines[j][2]
+                locks[_S_DEST].acquire()
+            for j in reset_dest_x:
+                states = _textlines[j][3]
+                states[_S_DEST_X] = _DEST_SCROLL_INIT
+            for j in reset_dest_x:
+                locks = _textlines[j][2]
+                locks[_S_DEST].release()
 
             # Clear any unused rows
             for j in range(i, _n_textlines):
