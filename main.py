@@ -24,10 +24,11 @@ _S_LINE = const(1)
 _S_DEST = const(2)
 _S_DEST_SZ = const(3)
 _S_DEST_X = const(4)
+_S_BLINKING = const(5)
 
 _FRAME_RATE = const(25)
 _DEST_SCROLL_DELAY = const(5)
-_RENDER_DELAY_MS = const(600)
+_BLINK_DELAY_MS = const(600)
 _FETCH_DELAY = const(10)
 _WARN_DURATION = const(45)
 _WARN_PAUSE = const(30)
@@ -482,27 +483,34 @@ def display_thread():
         textlines = _textlines
         n_textlines = _n_textlines
         t1 = time.ticks_ms()
+        t_blink = t1
         warn_x = 0
         warn_msg_sz = 0
+        blink_hide = False
         while not _disp_thread_stop:
             dest_off = _dest_offset
             line_width = dest_off - _COL_GAP
             dest_width = disp_width - line_width - _ETA_WIDTH - 2*_COL_GAP
             for i in range(n_textlines):
                 buf, mv, locks, states = textlines[i]
-                row_y = (row_y0 + i * row_h) * disp_width
+                row_y = (row_y0 + i * row_h)
+                row_offset = row_y * disp_width
                 # ETA column
                 if locks[_S_ETA].acquire(False):
-                    blit(disp_mv, mv, row_y + disp_width - _ETA_WIDTH, disp_width, 0, _TEXT_BUF_SZ, _ETA_WIDTH)
+                    blit(disp_mv, mv, row_offset + disp_width - _ETA_WIDTH, disp_width, 0, _TEXT_BUF_SZ, _ETA_WIDTH)
                     locks[_S_ETA].release()
                 # LINE column
                 if locks[_S_LINE].acquire(False):
-                    blit(disp_mv, mv, row_y, disp_width, _ETA_WIDTH, _TEXT_BUF_SZ, line_width)
+                    blit(disp_mv, mv, row_offset, disp_width, _ETA_WIDTH, _TEXT_BUF_SZ, line_width)
                     locks[_S_LINE].release()
                 # DEST column
                 if locks[_S_DEST].acquire(False):
                     dest_sz = states[_S_DEST_SZ]
                     #print("i:", i, "dest_sz: ", dest_sz, "dest_width:", dest_width)
+                    show = True
+                    if states[_S_BLINKING] and blink_hide:
+                        disp.rectangle(dest_off, row_y, dest_width, row_y+8)
+                        show = False
                     if dest_sz > dest_width:
                         dest_sz += 9
                         x = states[_S_DEST_X]
@@ -513,13 +521,14 @@ def display_thread():
                         if x < 0:
                             x = 0
                         #print("x: ", x)
-                        if x > dest_sz-dest_width:
-                            blit(disp_mv, mv, row_y + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_sz-x)
-                            blit(disp_mv, mv, row_y + dest_off + dest_sz - x, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width-dest_sz+x)
-                        else:
-                            blit(disp_mv, mv, row_y + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_width)
-                    else:
-                        blit(disp_mv, mv, row_y + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width)
+                        if show:
+                            if x > dest_sz-dest_width:
+                                blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_sz-x)
+                                blit(disp_mv, mv, row_offset + dest_off + dest_sz - x, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width-dest_sz+x)
+                            else:
+                                blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_width)
+                    elif show:
+                        blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width)
                     locks[_S_DEST].release()
             if _warn_msg_sz:
                 warn_buf_lock.acquire()
@@ -536,6 +545,9 @@ def display_thread():
             elif warn_msg_sz:
                 disp.rectangle(0, warn_y, disp_width, warn_y+8)
                 warn_msg_sz = 0
+            if t1 > t_blink:
+                t_blink += _BLINK_DELAY_MS
+                blink_hide = not blink_hide
             # elapsed = time.ticks_diff(time.ticks_ms(), t1)
             # print("elapsed", elapsed)
             # busy loop on core 2 to avoid flickering
@@ -561,7 +573,6 @@ async def render_task():
     print("render task started")
     await asyncio.sleep(5) # give a chance to read the IP address
     start_ms = 0
-    blink = True
     colored = False
     sub_colors = False
     print("waiting for first data")
@@ -572,7 +583,7 @@ async def render_task():
     _disp.clear()
     gc.collect()
     # _textlines[row] structure: ETA|LINE|DEST
-    zero_states = ["", "", "", 0, 0]
+    zero_states = ["", "", "", 0, 0, False]
     _textlines = []
     for _ in range(_n_textlines):
         buf, mv = make_col(_TEXT_BUF_SZ)
@@ -584,7 +595,7 @@ async def render_task():
 
     _thread.start_new_thread(display_thread, ())
     _safe_to_fetch.clear()
-    timestamp = time.ticks_ms()
+    t1 = time.ticks_ms()
     line_size_max = _LINE_MIN_WIDTH
     while True:
         try:
@@ -618,10 +629,10 @@ async def render_task():
 
                 eta_n //= 60
 
+                blinking = False
                 if eta_n < 1:
                     eta_s = ""
-                    if blink:
-                        dest = ""
+                    blinking = True
                 else:
                     eta_s = str(eta_n) + "'"
 
@@ -635,7 +646,7 @@ async def render_task():
                 tl_buf, _, locks, states = _textlines[i]
 
                 # render ETA at beginning of textline buffer
-                if eta_s != states[_S_ETA]:
+                if eta_s != states[_S_ETA] or force_update:
                     with locks[_S_ETA]:
                         tl_buf.set_pen(_BG)
                         tl_buf.rectangle(0, 0, _ETA_WIDTH, 8)
@@ -643,6 +654,7 @@ async def render_task():
                             set_pen(tl_buf, _BVG)
                             render_text(eta_s, tl_buf, _ETA_WIDTH - eta_size + 1, 0, clip=_ETA_WIDTH)
                         states[_S_ETA] = eta_s
+                        states[_S_BLINKING] = blinking
                         print(f"updated ETA of line {i}")
 
                 # then render LINE
@@ -695,25 +707,23 @@ async def render_task():
 
         except Exception as e:
             import sys
-
             print(f"render task failed: {e}")
             sys.print_exception(e)
             print("last data:", data)
         # print("---")
-        blink = not blink
 
         # Signal fetch task: "I'm done, safe to run now"
         _safe_to_fetch.set()  # Wake up fetch task
-        await asyncio.sleep_ms(0)  # Yield to let fetch see signal
+        await asyncio.sleep_ms(0) # Yield to let fetch see signal
         _safe_to_fetch.clear()  # Clear immediately (edge-trigger)
-        timestamp += _RENDER_DELAY_MS
-        delay = time.ticks_diff(timestamp, time.ticks_ms())
+        t1 += 1000
+        delay = time.ticks_diff(t1, time.ticks_ms())
         #print("render delay:", delay)
         if delay > 0:
             await asyncio.sleep_ms(delay)
         else:
             print("render_task took too long:", delay)
-            timestamp -= delay
+            t1 -= delay
 
 _time_set = False
 
