@@ -263,8 +263,8 @@ def banner():
     bvg = PicoGraphics(display=hw_conf.DISPLAY)
     bvg_mv = memoryview(bvg)
     png2 = pngdec.PNG(bvg)
-    png2.open_file("bvg_logo_32.png")
-    png2.decode(46, pos_y)
+    png2.open_file("bvgdisp_logo.png")
+    png2.decode(23, pos_y)
     l = _disp_width*4
     h75 = _h75
     for y in range(33):
@@ -357,10 +357,10 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
         width = glyph[0] - 1
         if kerning:
             for row in range(height):
-                if bold:
-                    check = glyph[row + 1] >> width and ((last_col & (0b10<<row)) != 0)
-                else:
-                    check = glyph[row + 1] >> width and ((last_col & (0b111<<row)) != 0)
+                # if bold:
+                #     check = glyph[row + 1] >> width and ((last_col & (0b10<<row)) != 0)
+                # else:
+                check = glyph[row + 1] >> width and ((last_col & (0b111<<row)) != 0)
                 if check:
                     cursor_x += 1
                     break
@@ -841,6 +841,7 @@ async def data_fetch_task():
                             # if not warn_id:
                             #     warn_id = 99
                             #     warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
+                            #     warn_msg = "Störung: Bus 100: Derzeit fährt die Linie nicht. Bitte nutzen Sie alternativ die U5. (S+U Alexanderplatz Bhf - U Bundestag) *** "
                         if warn_id != current_warn_id:
                             current_warn_id = warn_id
                             warn_msg_update(warn_msg)
