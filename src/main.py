@@ -11,32 +11,19 @@ import settings
 import hw_conf
 import gc
 import _thread
-import json
 
 _ETA_WIDTH = const(11)
+_COL_GAP = const(3)
 
 _TEXT_BUF_SZ = const(512)
 _WARN_BUF_SZ = const(2560)
-_COL_GAP = const(3)
-
-_S_ETA = const(0)
-_S_LINE = const(1)
-_S_DEST = const(2)
-_S_DEST_SZ = const(3)
-_S_DEST_X = const(4)
-_S_BLINKING = const(5)
 
 _FRAME_RATE = const(25)
 _DEST_SCROLL_DELAY = const(5)
 _BLINK_DELAY_MS = const(600)
 _FETCH_DELAY = const(10)
-_WARN_DURATION = const(45)
-_WARN_PAUSE = const(30)
-
-_FRAME_DELAY = const(1000//_FRAME_RATE)
-_DEST_SCROLL_INIT = const(-_FRAME_RATE*_DEST_SCROLL_DELAY)
-_WARN_CYCLE = const(_WARN_DURATION+_WARN_PAUSE)
-_LINE_MIN_WIDTH = const(13)
+_WARN_DURATION_MS = const(45 * 1000)
+_WARN_PAUSE_MS = const(30 * 1000)
 
 # Colors as tuples (R, G, B)
 _RED = const((120, 0, 0))
@@ -45,6 +32,18 @@ _BVG = const((255, 170, 0))
 _WHITE = const((255, 255, 255))
 #_BG = const((4 << 16) + (4 << 8) + 4)
 _BG = const(0)
+
+_S_ETA = const(0)
+_S_LINE = const(1)
+_S_DEST = const(2)
+_S_DEST_SZ = const(3)
+_S_DEST_X = const(4)
+_S_BLINKING = const(5)
+
+_FRAME_DELAY_MS = const(1000//_FRAME_RATE)
+_DEST_SCROLL_INIT = const(-_FRAME_RATE*_DEST_SCROLL_DELAY)
+_WARN_CYCLE_MS = const(_WARN_DURATION_MS+_WARN_PAUSE_MS)
+_LINE_MIN_WIDTH = const(13)
 
 _rtc = machine.RTC()
 
@@ -61,8 +60,8 @@ def make_disp():
     mv = memoryview(disp)
     return disp, mv
 
-def make_col(col_w):
-    buf = PicoGraphics(width=col_w, height=8, display=DISPLAY_GENERIC, pen_type=PEN_RGB888)
+def make_textbuf(sz):
+    buf = PicoGraphics(width=sz, height=8, display=DISPLAY_GENERIC, pen_type=PEN_RGB888)
     buf.set_pen(0)
     buf.clear()
     # (buf, buf_mv, lock, buf_width)
@@ -73,10 +72,9 @@ _disp.set_pen(0)
 _disp.clear()
 _disp_width, _disp_height = _disp.get_bounds()
 
-_warn_y = 55 if _disp_height == 64 else 24
 _row_y0 = 1 if _disp_height == 64 else 0
 _row_height = 9 if _disp_height == 64 else 8
-_n_textlines = (_warn_y - _row_y0) // _row_height + 1  # +1: last row shares the scroll position
+_n_textlines = (_disp_height - _row_y0) // _row_height
 
 _dest_offset = 0
 
@@ -479,25 +477,46 @@ def display_thread():
         disp = _disp
         disp_mv = _disp_mv
         disp_width = _disp_width
-        warn_y = _warn_y
         row_y0 = _row_y0
         row_h = _row_height
         textlines = _textlines
         n_textlines = _n_textlines
+        warn_y = row_y0 + (row_h * (n_textlines-1))
         separator_sz = _separator_sz
         t1 = time.ticks_ms()
         t_blink = t1
+        t_warn = t1
+        warn_show = False
         warn_x = 0
-        warn_msg_sz = 0
         blink_hide = False
         dest_off = 0
         disp.set_pen(0)
         while not _disp_thread_stop:
+            n = n_textlines
             disp.clear()
             dest_off = _dest_offset
             line_width = dest_off - _COL_GAP
             dest_width = disp_width - line_width - _ETA_WIDTH - 2*_COL_GAP
-            for i in range(n_textlines):
+            if t1 > t_warn + _WARN_PAUSE_MS:
+                if t1 > t_warn + _WARN_CYCLE_MS:
+                    warn_show = False
+                    t_warn += _WARN_CYCLE_MS
+                else:
+                    warn_show = True
+            if warn_show and _warn_msg_sz:
+                warn_buf_lock.acquire()
+                warn_msg_sz = _warn_msg_sz
+                if warn_x >= warn_msg_sz:
+                    warn_x = 0
+                if warn_x > warn_msg_sz-disp_width:
+                    blit(disp_mv, warn_mv, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, warn_msg_sz-warn_x)
+                    blit(disp_mv, warn_mv, warn_y*disp_width+warn_msg_sz-warn_x, disp_width, 0, _WARN_BUF_SZ, disp_width-warn_msg_sz+warn_x)
+                else:
+                    blit(disp_mv, warn_mv, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, disp_width)
+                warn_buf_lock.release()
+                warn_x += 1
+                n = n_textlines - 1
+            for i in range(n):
                 buf, mv, locks, states = textlines[i]
                 row_y = (row_y0 + i * row_h)
                 row_offset = row_y * disp_width
@@ -537,28 +556,13 @@ def display_thread():
                         disp.rectangle(dest_off, row_y, dest_width, 8)
                         blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_sz)
                     locks[_S_DEST].release()
-            if _warn_msg_sz:
-                warn_buf_lock.acquire()
-                warn_msg_sz = _warn_msg_sz
-                if warn_x >= warn_msg_sz:
-                    warn_x = 0
-                if warn_x > warn_msg_sz-disp_width:
-                    blit(disp_mv, warn_mv, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, warn_msg_sz-warn_x)
-                    blit(disp_mv, warn_mv, warn_y*disp_width+warn_msg_sz-warn_x, disp_width, 0, _WARN_BUF_SZ, disp_width-warn_msg_sz+warn_x)
-                else:
-                    blit(disp_mv, warn_mv, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, disp_width)
-                warn_buf_lock.release()
-                warn_x += 1
-            elif warn_msg_sz:
-                disp.rectangle(0, warn_y, disp_width, 8)
-                warn_msg_sz = 0
             if t1 > t_blink:
                 t_blink += _BLINK_DELAY_MS
                 blink_hide = not blink_hide
             # elapsed = time.ticks_diff(time.ticks_ms(), t1)
             # print("elapsed", elapsed)
             # busy loop on core 2 to avoid flickering
-            t1 += _FRAME_DELAY
+            t1 += _FRAME_DELAY_MS
             while True:
                 if time.ticks_ms() >= t1:
                     break
@@ -591,7 +595,7 @@ async def render_task():
     zero_states = ["", "", "", 0, 0, False]
     _textlines = []
     for _ in range(_n_textlines):
-        buf, mv = make_col(_TEXT_BUF_SZ)
+        buf, mv = make_textbuf(_TEXT_BUF_SZ)
         _textlines.append((
             buf, mv,
             (_thread.allocate_lock(), _thread.allocate_lock(),_thread.allocate_lock()),
@@ -822,26 +826,25 @@ async def data_fetch_task():
                         warn_id = 0
                         warn_msg = ""
                         prio_min = 100
-                        if (time.time() % _WARN_CYCLE) > _WARN_PAUSE:
-                            for warn in data["warnings"]:
-                                #print("warn:", warn)
-                                now = time.time()
-                                prio = warn["priority"]
-                                if (prio >= prio_min
-                                        and now >= parse_iso_to_epoch(warn["validFrom"])
-                                        and now <= parse_iso_to_epoch(warn["validUntil"])):
-                                    warn_id = warn["id"]
-                                    summary = warn["summary"]
-                                    text = warn["text"].split("\n")[0]
-                                    text = text.replace(" [Endstelle]", "")
-                                    text = text.replace(" (Berlin)", "")
-                                    text = text.replace("  ", " ")
-                                    warn_msg = f'{summary}: {text} *** '
-                                    prio_min = prio+1
-                            # if not warn_id:
-                            #     warn_id = 99
-                            #     warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
-                            #     warn_msg = "Störung: Bus 100: Derzeit fährt die Linie nicht. Bitte nutzen Sie alternativ die U5. (S+U Alexanderplatz Bhf - U Bundestag) *** "
+                        for warn in data["warnings"]:
+                            #print("warn:", warn)
+                            now = time.time()
+                            prio = warn["priority"]
+                            if (prio >= prio_min
+                                    and now >= parse_iso_to_epoch(warn["validFrom"])
+                                    and now <= parse_iso_to_epoch(warn["validUntil"])):
+                                warn_id = warn["id"]
+                                summary = warn["summary"]
+                                text = warn["text"].split("\n")[0]
+                                text = text.replace(" [Endstelle]", "")
+                                text = text.replace(" (Berlin)", "")
+                                text = text.replace("  ", " ")
+                                warn_msg = f'{summary}: {text} *** '
+                                prio_min = prio+1
+                        # if not warn_id:
+                        #     warn_id = 99
+                        #     # warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
+                        #     warn_msg = "Störung: Bus 100: Derzeit fährt die Linie nicht. Bitte nutzen Sie alternativ die U5. (S+U Alexanderplatz Bhf - U Bundestag) *** "
                         if warn_id != current_warn_id:
                             current_warn_id = warn_id
                             warn_msg_update(warn_msg)
@@ -940,7 +943,9 @@ async def main():
 
 banner()
 
-_warn_buf  = make_col(_WARN_BUF_SZ)
+gc.collect()
+
+_warn_buf  = make_textbuf(_WARN_BUF_SZ)
 _warn_buf_lock = _thread.allocate_lock()
 _warn_msg = ""
 _warn_msg_sz = 0
