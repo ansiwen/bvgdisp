@@ -264,7 +264,7 @@ def banner():
     bvg_mv = memoryview(bvg)
     png2 = pngdec.PNG(bvg)
     png2.open_file("bvgdisp_logo.png")
-    png2.decode(23, pos_y)
+    png2.decode(19, pos_y)
     l = _disp_width*4
     h75 = _h75
     for y in range(33):
