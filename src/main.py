@@ -15,13 +15,14 @@ import _thread
 _ETA_WIDTH = const(11)
 _COL_GAP = const(3)
 
-_TEXT_BUF_SZ = const(512)
+_TEXT_BUF_SZ = const(384)
 _WARN_BUF_SZ = const(2560)
 
 _FRAME_RATE = const(25)
 _DEST_SCROLL_DELAY = const(5)
 _BLINK_DELAY_MS = const(600)
 _FETCH_DELAY = const(10)
+_RENDER_CYCLE_MS = const(1000)
 _WARN_DURATION_MS = const(45 * 1000)
 _WARN_PAUSE_MS = const(30 * 1000)
 
@@ -606,6 +607,7 @@ async def render_task():
     _safe_to_fetch.clear()
     t1 = time.ticks_ms()
     line_size_max = _LINE_MIN_WIDTH
+    dim = 10
     while True:
         try:
             data = _dep_data
@@ -624,6 +626,9 @@ async def render_task():
             dest_offset = line_size_max + _COL_GAP
             if _dest_offset != dest_offset:
                 _dest_offset = dest_offset
+                force_update = True
+            if _dimming != dim:
+                dim = _dimming
                 force_update = True
             line_width = line_size_max
             i = 0
@@ -725,7 +730,7 @@ async def render_task():
         _safe_to_fetch.set()  # Wake up fetch task
         await asyncio.sleep_ms(0) # Yield to let fetch see signal
         _safe_to_fetch.clear()  # Clear immediately (edge-trigger)
-        t1 += 1000
+        t1 += _RENDER_CYCLE_MS
         delay = time.ticks_diff(t1, time.ticks_ms())
         #print("render delay:", delay)
         if delay > 0:
