@@ -11,6 +11,7 @@ import settings
 import hw_conf
 import gc
 import _thread
+import crashlog
 
 _ETA_WIDTH = const(11)
 _COL_GAP = const(3)
@@ -462,12 +463,14 @@ def warn_msg_update(msg=None):
 
 _disp_thread_stop = False
 _disp_thread_lock = _thread.allocate_lock()
+_disp_thread_crash = None  # backtrace text, written to flash by core 0
 
 _separator = " - "
 _separator_sz = render_text(_separator, kerning=True)
 
 @micropython.native
 def display_thread():
+    global _disp_thread_crash
     print("display_thread started")
     warn_mv = _warn_buf[1]
     warn_buf_lock = _warn_buf_lock
@@ -569,12 +572,26 @@ def display_thread():
                     break
             h75.update(disp)
     except Exception as e:
-        import sys
         print(f"display thread failed: {e}")
-        sys.print_exception(e)
+        _disp_thread_crash = crashlog.format_exception("display_thread", e)
+        print(_disp_thread_crash)
     finally:
         print("display thread finished")
         _disp_thread_lock.release()
+
+def write_disp_thread_crash():
+    global _disp_thread_crash
+    text = _disp_thread_crash
+    _disp_thread_crash = None
+    if text:
+        crashlog.write(text)
+
+def asyncio_exception_handler(loop, context):
+    e = context.get("exception")
+    if e is None:
+        print("asyncio error:", context.get("message"))
+        return
+    crashlog.log_exception("task " + str(context.get("future")), e)
 
 _dep_data = None
 _safe_to_fetch = asyncio.Event()
@@ -609,6 +626,8 @@ async def render_task():
     line_size_max = _LINE_MIN_WIDTH
     dim = 10
     while True:
+        if _disp_thread_crash:
+            write_disp_thread_crash()
         try:
             data = _dep_data
             now = time.time()
@@ -913,6 +932,8 @@ async def check_night_time_task():
 async def main():
     from web_server import start_web_server
 
+    asyncio.get_event_loop().set_exception_handler(asyncio_exception_handler)
+
     # Check if WiFi credentials are configured
     ssid = settings.get("WIFI_SSID")
     password = settings.get("WIFI_PASSWORD")
@@ -958,9 +979,13 @@ _warn_msg_sz = 0
 # Start the event loop
 try:
     asyncio.run(main())
+except Exception as e:
+    crashlog.log_exception("main", e)
+    raise
 finally:
     print("shutting down")
     _h75.stop()
     _disp_thread_stop = True
     _disp_thread_lock.acquire()
     _disp_thread_lock.release()
+    write_disp_thread_crash()
