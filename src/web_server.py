@@ -124,7 +124,8 @@ def change_password(nonce, old_response, encrypted_new_hash, new_salt):
     return True, "Password changed"
 
 
-HTML_PAGE = """<!DOCTYPE html>
+# bytes, so send_response() needn't encode a 34 KB copy per request
+HTML_PAGE = b"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">

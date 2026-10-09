@@ -900,7 +900,7 @@ async def data_fetch_task():
             params = {
                 "results": "14",
                 "duration": "60",
-                "pretty": "true",
+                "pretty": "false",  # whitespace costs RAM: the body is held whole
                 "sparse": "true",
                 "language": "de",
             }
