@@ -190,7 +190,6 @@ def connectivity_test(host="1.1.1.1", port=80, timeout=60):
         time.sleep(1)
         machine.reset()
 
-@micropython.native
 def parse_iso_to_epoch(date_str):
     # Split off timezone
     dt_part = date_str[:19]  # "2026-01-04T04:46:00"
@@ -221,37 +220,18 @@ def parse_iso_to_epoch(date_str):
     return timestamp - tz_offset
 
 
-@micropython.native
 def parse_http_date(date_str):
-    # "Mon, 05 Jan 2026 19:17:30 GMT"
-    import time
-
-    months = {
-        "Jan": 1,
-        "Feb": 2,
-        "Mar": 3,
-        "Apr": 4,
-        "May": 5,
-        "Jun": 6,
-        "Jul": 7,
-        "Aug": 8,
-        "Sep": 9,
-        "Oct": 10,
-        "Nov": 11,
-        "Dec": 12,
-    }
-
+    """Parse "Mon, 05 Jan 2026 19:17:30 GMT" into an RTC.datetime() tuple:
+    (year, month, day, weekday, hours, minutes, seconds, subseconds)"""
     parts = date_str.split()
     day = int(parts[1])
-    month = months[parts[2]]
+    month = "JanFebMarAprMayJunJulAugSepOctNovDec".index(parts[2])
+    if len(parts[2]) != 3 or month % 3:
+        raise ValueError("bad month: " + parts[2])
+    month = month // 3 + 1
     year = int(parts[3])
-
     hour, minute, second = map(int, parts[4].split(":"))
-
-    # RTC.datetime() format: (year, month, day, weekday, hours, minutes, seconds, subseconds)
-    timestamp = (year, month, day, 0, hour, minute, second, 0)
-
-    return timestamp
+    return (year, month, day, 0, hour, minute, second, 0)
 
 
 @micropython.native
@@ -797,7 +777,6 @@ async def render_task():
 
 _time_set = False
 
-@micropython.native
 def parse_color(s):
     if not s:
         return None
