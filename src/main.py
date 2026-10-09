@@ -543,8 +543,12 @@ def display_thread():
                     if dest_sz > dest_width:
                         dest_sz += min(separator_sz, _TEXT_BUF_SZ - _ETA_WIDTH - line_width - dest_sz)
                         x = states[_S_DEST_X]
+                        if x >= dest_sz:
+                            # guard against a stale offset from a longer dest:
+                            # it would make the blit length negative
+                            x = _DEST_SCROLL_INIT
                         next_x = x+1
-                        if next_x == dest_sz:
+                        if next_x >= dest_sz:
                             next_x = _DEST_SCROLL_INIT
                         states[_S_DEST_X] = next_x
                         if x < 0:
@@ -713,6 +717,10 @@ async def render_task():
                         set_pen(tl_buf, _BVG)
                         states[_S_DEST_SZ] = render_text(dest + _separator, tl_buf, _ETA_WIDTH + line_width, 0, clip=_TEXT_BUF_SZ - _ETA_WIDTH - line_width, kerning=True) - _separator_sz
                         states[_S_DEST] = dest
+                        # reset now, so the display thread never combines the
+                        # new dest size with the old scroll offset; all
+                        # updated rows get reset again below to scroll in sync
+                        states[_S_DEST_X] = _DEST_SCROLL_INIT
                         reset_dest_x.append(i)
                         print(f"updated DEST of line {i}")
                 i += 1
