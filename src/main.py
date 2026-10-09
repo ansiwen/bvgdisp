@@ -521,8 +521,9 @@ def display_thread():
                     t_warn = ticks_add(t_warn, _WARN_CYCLE_MS)
                 else:
                     warn_show = True
-            if warn_show and _warn_msg_sz:
-                warn_buf_lock.acquire()
+            # don't block: warn_msg_update() holds the lock while rendering
+            # the whole message; draw the normal last row meanwhile
+            if warn_show and _warn_msg_sz and warn_buf_lock.acquire(False):
                 warn_msg_sz = _warn_msg_sz
                 if warn_x >= warn_msg_sz:
                     warn_x = 0
