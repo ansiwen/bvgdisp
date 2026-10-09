@@ -988,17 +988,10 @@ async def main():
 
     # Check if WiFi credentials are configured
     ssid = settings.get("WIFI_SSID")
-    password = settings.get("WIFI_PASSWORD")
-    ap_mode = False
-
-    if not ssid or ssid == "REPLACE_WITH_YOUR_SSID":
-        console("No WiFi configured", clear=True)
+    ap_mode = not (ssid and ssid != "REPLACE_WITH_YOUR_SSID"
+                   and network_connect(ssid, settings.get("WIFI_PASSWORD")))
+    if ap_mode:
         start_ap_mode()
-        ap_mode = True
-    elif not network_connect(ssid, password):
-        console("Starting AP mode...")
-        start_ap_mode()
-        ap_mode = True
     else:
         connectivity_test()
         console("connected to internet")
