@@ -920,7 +920,7 @@ async def data_fetch_task():
 
 async def check_night_time_task():
     """Check if current time is within night hours"""
-    global _dimming, _time_set
+    global _dimming
     while not _time_set:
         await asyncio.sleep(1)
     while True:
