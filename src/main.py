@@ -48,6 +48,10 @@ _DEST_SCROLL_INIT = const(-_FRAME_RATE*_DEST_SCROLL_DELAY)
 _WARN_CYCLE_MS = const(_WARN_DURATION_MS+_WARN_PAUSE_MS)
 _LINE_MIN_WIDTH = const(13)
 
+# Reset the device when the program crashes. Set to False for debugging,
+# to keep the device stopped at the REPL after the backtrace.
+_RESET_ON_CRASH = const(True)
+
 _rtc = machine.RTC()
 
 # Enable the Wireless
@@ -923,33 +927,40 @@ async def check_night_time_task():
     while True:
         print("check_night_time")
         now = _rtc.datetime()
-        # RTC is UTC, apply timezone offset
-        tz_offset = settings.get("TIMEZONE") or 0
-        current_minutes = (now[4] + tz_offset) * 60 + now[5]  # (hours + tz) * 60 + minutes
-        # Normalize to 0-1439 range (24 hours = 1440 minutes)
-        current_minutes = current_minutes % 1440 + 1
+        # bad settings (e.g. NIGHT_START "") must not end the task: an
+        # exception escaping it stops the whole program
+        try:
+            # RTC is UTC, apply timezone offset
+            tz_offset = settings.get("TIMEZONE") or 0
+            current_minutes = (now[4] + tz_offset) * 60 + now[5]  # (hours + tz) * 60 + minutes
+            # Normalize to 0-1439 range (24 hours = 1440 minutes)
+            current_minutes = current_minutes % 1440 + 1
 
-        start = settings.get("NIGHT_START")
-        end = settings.get("NIGHT_END")
+            start = settings.get("NIGHT_START")
+            end = settings.get("NIGHT_END")
 
-        start_h, start_m = map(int, start.split(":"))
-        end_h, end_m = map(int, end.split(":"))
+            start_h, start_m = map(int, start.split(":"))
+            end_h, end_m = map(int, end.split(":"))
 
-        start_minutes = start_h * 60 + start_m
-        end_minutes = end_h * 60 + end_m
+            start_minutes = start_h * 60 + start_m
+            end_minutes = end_h * 60 + end_m
 
-        since_start = (current_minutes-start_minutes)%(24*60)
-        since_end = (current_minutes-end_minutes)%(24*60)
+            since_start = (current_minutes-start_minutes)%(24*60)
+            since_end = (current_minutes-end_minutes)%(24*60)
 
-        if since_start < since_end:
-            dim = int(settings.get("NIGHT_DIMMING"))
-        else:
-            dim = 10
+            if since_start < since_end:
+                dim = int(settings.get("NIGHT_DIMMING"))
+            else:
+                dim = 10
 
-        if _dimming != dim:
-            print("changing dimming")
-            _dimming = dim
-            warn_msg_update()
+            if _dimming != dim:
+                print("changing dimming")
+                _dimming = dim
+                warn_msg_update()
+        except Exception as e:
+            import sys
+            print(f"night time check failed: {e}")
+            sys.print_exception(e)
 
         await asyncio.sleep(85 - (now[6] + 30) % 60)
 
@@ -1002,9 +1013,11 @@ _warn_msg = ""
 _warn_msg_sz = 0
 
 # Start the event loop
+_crashed = False
 try:
     asyncio.run(main())
 except Exception as e:
+    _crashed = True
     crashlog.log_exception("main", e)
     raise
 finally:
@@ -1014,3 +1027,7 @@ finally:
     _disp_thread_lock.acquire()
     _disp_thread_lock.release()
     write_disp_thread_crash()
+    # only on a crash, not on Ctrl-C, so the REPL stays usable
+    if _crashed and _RESET_ON_CRASH:
+        print("resetting")
+        machine.reset()
