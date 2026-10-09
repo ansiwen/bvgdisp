@@ -62,19 +62,14 @@ _wlan = network.WLAN(network.STA_IF)
 
 # Setup for the display
 
-def make_disp():
-    disp = PicoGraphics(display=hw_conf.DISPLAY)
-    mv = memoryview(disp)
-    return disp, mv
-
 def make_textbuf(sz):
     buf = PicoGraphics(width=sz, height=8, display=DISPLAY_GENERIC, pen_type=PEN_RGB888)
     buf.set_pen(0)
     buf.clear()
-    # (buf, buf_mv, lock, buf_width)
     return (buf, memoryview(buf))
 
-_disp, _disp_mv = make_disp()
+_disp = PicoGraphics(display=hw_conf.DISPLAY)
+_disp_mv = memoryview(_disp)
 _disp.set_pen(0)
 _disp.clear()
 _disp_width, _disp_height = _disp.get_bounds()
