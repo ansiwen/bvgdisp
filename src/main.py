@@ -405,7 +405,18 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
 
 @micropython.viper
 def blit(dest: ptr32, src: ptr32, dst_off: uint, dst_width: uint, src_off: uint, src_width: uint, length: uint):
-    """fast copy of 8 lines from a text buffer to the display buffer"""
+    """fast copy of 8 lines from a text buffer to the display buffer
+
+    Hand-optimized for the display thread's frame budget: the 8x unrolled
+    copy and the pointer arithmetic are deliberate. Don't restructure or
+    "simplify" it without measuring frame times on the device.
+
+    Offsets and lengths are in pixels (4 bytes each, RGB888). There are no
+    bounds checks: callers must keep length >= 0 (a negative one becomes a
+    huge uint) and keep offset + length within the row width of both
+    buffers for all 8 rows. Out-of-range values silently corrupt memory,
+    so fix display glitches in the callers' arithmetic, not here.
+    """
     dest = ptr32(uint(dest) + dst_off*4)
     src = ptr32(uint(src) + src_off*4)
     src_stop = uint(0)
