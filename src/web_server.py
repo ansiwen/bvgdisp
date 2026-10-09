@@ -10,6 +10,7 @@ _sessions = {}  # token -> last_activity_time
 _nonces = {}  # nonce -> expiry_time
 SESSION_TIMEOUT = 600  # 10 minutes in seconds
 NONCE_TIMEOUT = 60  # 1 minute for nonce validity
+MAX_BODY_SIZE = 4096  # settings JSON is well below 1 KB
 
 
 def _generate_hex(length=16):
@@ -1015,8 +1016,11 @@ async def parse_request(reader):
     body = None
     if "content-length" in headers:
         content_length = int(headers["content-length"])
+        if content_length > MAX_BODY_SIZE:
+            raise ValueError("request body too large: %d" % content_length)
         if content_length > 0:
-            body = await reader.read(content_length)
+            # read() may return a partial body if it spans TCP segments
+            body = await reader.readexactly(content_length)
             body = body.decode("utf-8")
 
     return method, path, headers, body
