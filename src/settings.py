@@ -1,4 +1,5 @@
 import json
+import os
 
 SETTINGS_FILE = "/settings.json"
 
@@ -45,9 +46,16 @@ def _load():
 
 def _save():
     """Save current settings to file"""
-    with open(SETTINGS_FILE, "w") as f:
-        data = json.dumps(_settings, separators=(",\n", ": "))
-        f.write(data.replace("{", "{\n").replace("}", "\n}\n"))
+    data = json.dumps(_settings, separators=(",\n", ": "))
+    # put the outer braces on their own lines; a replace() on the whole
+    # string would also hit braces inside values like the WiFi password
+    data = "{\n" + data[1:-1] + "\n}\n"
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(data)
+    # littlefs renames atomically, so a power loss during the write can't
+    # leave a truncated settings file (which would load as all defaults)
+    os.rename(tmp, SETTINGS_FILE)
     print(f"Settings saved to {SETTINGS_FILE}")
 
 
