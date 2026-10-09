@@ -42,3 +42,9 @@ def log_exception(where, e):
     text = format_exception(where, e)
     print(text)
     write(text)
+
+
+def print_error(msg, e):
+    """Print msg and the backtrace of e to the console (doesn't touch flash)."""
+    print(msg + ":", e)
+    sys.print_exception(e)

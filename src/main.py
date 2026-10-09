@@ -185,10 +185,7 @@ def connectivity_test(host="1.1.1.1", port=80, timeout=60):
         s.close()
         return True
     except Exception as e:
-        import sys
-
-        print(f"Connectivity test failed: {e}")
-        sys.print_exception(e)
+        crashlog.print_error("Connectivity test failed", e)
         console("No Internet. Restarting...")
         time.sleep(1)
         machine.reset()
@@ -773,9 +770,7 @@ async def render_task():
                     lock.release()
 
         except Exception as e:
-            import sys
-            print(f"render task failed: {e}")
-            sys.print_exception(e)
+            crashlog.print_error("render task failed", e)
             print("last data:", data)
         # print("---")
 
@@ -931,10 +926,7 @@ async def data_fetch_task():
         except asyncio.TimeoutError:
             print("fetch timed out")
         except Exception as e:
-            import sys
-
-            print(f"Fetch task failed: {e}")
-            sys.print_exception(e)
+            crashlog.print_error("Fetch task failed", e)
 
         print("memfree:", gc.mem_free())
         # print("fetch finished")
@@ -983,9 +975,7 @@ async def check_night_time_task():
                 _dimming = dim
                 warn_msg_update()
         except Exception as e:
-            import sys
-            print(f"night time check failed: {e}")
-            sys.print_exception(e)
+            crashlog.print_error("night time check failed", e)
 
         await asyncio.sleep(85 - (now[6] + 30) % 60)
 
