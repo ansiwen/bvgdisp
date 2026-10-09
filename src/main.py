@@ -207,11 +207,14 @@ def parse_iso_to_epoch(date_str):
     minute = int(dt_part[14:16])
     second = int(dt_part[17:19])
 
-    # Parse timezone offset
-    tz_sign = 1 if tz_part[0] == "+" else -1
-    tz_hours = int(tz_part[1:3])
-    tz_mins = int(tz_part[4:6])
-    tz_offset = tz_sign * (tz_hours * 3600 + tz_mins * 60)
+    # Parse timezone offset ("Z" or none means UTC)
+    if not tz_part or tz_part[0] == "Z":
+        tz_offset = 0
+    else:
+        tz_sign = 1 if tz_part[0] == "+" else -1
+        tz_hours = int(tz_part[1:3])
+        tz_mins = int(tz_part[4:6])
+        tz_offset = tz_sign * (tz_hours * 3600 + tz_mins * 60)
 
     # Convert to epoch (UTC)
     # mktime expects: (year, month, day, hour, min, sec, weekday, yearday)
@@ -833,44 +836,56 @@ async def data_fetch_task():
                     new_data = []
                     filtered = settings.get("FILTERED")
                     for dep in data["departures"]:
-                        when = dep["when"]
-                        if not when:
-                            continue
-                        when = parse_iso_to_epoch(when)
-                        line_obj = dep["line"]
-                        line = line_obj["name"]
-                        if line in filtered:
-                            continue
-                        typ = line_obj["product"]
-                        # Clean up destination
-                        dest = dep["direction"] #.split(", ")[-1]
-                        dest = dest.replace(" [Endstelle]", "")
-                        dest = dest.replace(" (Berlin)", "")
-                        dest = dest.replace("  ", " ")
-                        dest = dest.strip()
-                        bg = parse_color(line_obj.get("color", {}).get("bg"))
+                        try:
+                            when = dep["when"]
+                            if not when:
+                                continue
+                            when = parse_iso_to_epoch(when)
+                            line_obj = dep["line"]
+                            line = line_obj["name"]
+                            if line in filtered:
+                                continue
+                            typ = line_obj["product"]
+                            # Clean up destination
+                            dest = dep["direction"] #.split(", ")[-1]
+                            dest = dest.replace(" [Endstelle]", "")
+                            dest = dest.replace(" (Berlin)", "")
+                            dest = dest.replace("  ", " ")
+                            dest = dest.strip()
+                            bg = parse_color((line_obj.get("color") or {}).get("bg"))
 
-                        new_data.append((line, typ, dest, when, bg))
+                            new_data.append((line, typ, dest, when, bg))
+                        except Exception as e:
+                            # skip just this one, e.g. "direction": null
+                            print("skipping bad departure:", e)
                     # new_data[1] = (new_data[1][0], new_data[1][1], "S+U Zoologischer Garten", new_data[1][3], new_data[1][4])
                     _dep_data = new_data
                     warn_id = 0
                     warn_msg = ""
                     prio_min = 100
                     for warn in data["warnings"]:
-                        #print("warn:", warn)
-                        now = time.time()
-                        prio = warn["priority"]
-                        if (prio >= prio_min
-                                and now >= parse_iso_to_epoch(warn["validFrom"])
-                                and now <= parse_iso_to_epoch(warn["validUntil"])):
-                            warn_id = warn["id"]
-                            summary = warn["summary"]
-                            text = warn["text"].split("\n")[0]
-                            text = text.replace(" [Endstelle]", "")
-                            text = text.replace(" (Berlin)", "")
-                            text = text.replace("  ", " ")
-                            warn_msg = f'{summary}: {text} *** '
-                            prio_min = prio+1
+                        try:
+                            #print("warn:", warn)
+                            now = time.time()
+                            prio = warn["priority"]
+                            # missing or null validity means open-ended
+                            valid_from = warn.get("validFrom")
+                            valid_until = warn.get("validUntil")
+                            if (prio >= prio_min
+                                    and (not valid_from or now >= parse_iso_to_epoch(valid_from))
+                                    and (not valid_until or now <= parse_iso_to_epoch(valid_until))):
+                                summary = warn["summary"]
+                                text = warn["text"].split("\n")[0]
+                                text = text.replace(" [Endstelle]", "")
+                                text = text.replace(" (Berlin)", "")
+                                text = text.replace("  ", " ")
+                                # set together, so a bad field can't pair one
+                                # warning's id with another one's text
+                                warn_id = warn["id"]
+                                warn_msg = f'{summary}: {text} *** '
+                                prio_min = prio+1
+                        except Exception as e:
+                            print("skipping bad warning:", e)
                     # if not warn_id:
                     #     warn_id = 99
                     #     # warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
