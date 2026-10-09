@@ -911,13 +911,9 @@ async def data_fetch_task():
                 "sparse": "true",
                 "language": "de",
             }
-            if not settings.get("SHOW_BUS"): params["bus"] = "false"
-            if not settings.get("SHOW_TRAM"): params["tram"] = "false"
-            if not settings.get("SHOW_SUBWAY"): params["subway"] = "false"
-            if not settings.get("SHOW_REGIONAL"): params["regional"] = "false"
-            if not settings.get("SHOW_SUBURBAN"): params["suburban"] = "false"
-            if not settings.get("SHOW_FERRY"): params["ferry"] = "false"
-            if not settings.get("SHOW_EXPRESS"): params["express"] = "false"
+            for product in ("bus", "tram", "subway", "regional", "suburban", "ferry", "express"):
+                if not settings.get("SHOW_" + product.upper()):
+                    params[product] = "false"
             if _time_set: params["when"] = str(time.time() + int(settings.get("WALK_DELAY")))
             # aiohttp has no timeouts: without this, a server or link that stops
             # responding mid-request would hang the fetch task forever
