@@ -454,15 +454,20 @@ def blit(dest: ptr32, src: ptr32, dst_off: uint, dst_width: uint, src_off: uint,
         dest = ptr32(uint(dest) + (dst_width-length)*4)
         src = ptr32(uint(src) + (src_width-length)*4)
 
-def warn_msg_update(msg=None):
-    global _warn_msg, _warn_msg_sz
+def set_warn_msg(msg):
+    """Show msg in the warning ticker ("" hides it), if it changed."""
+    global _warn_msg
+    if _warn_msg == msg:
+        return
+    _warn_msg = msg
+    render_warn_msg()
+
+def render_warn_msg():
+    """(Re-)render the current warning into the ticker buffer, e.g. after
+    the dimming changed."""
+    global _warn_msg_sz
+    msg = _warn_msg
     warn_buf = _warn_buf[0]
-    if msg == None:
-        msg = _warn_msg
-    else:
-        if _warn_msg == msg:
-            return
-        _warn_msg = msg
     # hide the ticker while it's re-rendered (or gone)
     _warn_msg_sz = 0
     if not msg:
@@ -529,7 +534,7 @@ def display_thread():
                     t_warn = ticks_add(t_warn, _WARN_CYCLE_MS)
                 else:
                     warn_show = True
-            # don't block: warn_msg_update() holds the lock while rendering
+            # don't block: render_warn_msg() holds the lock while rendering
             # the whole message; draw the normal last row meanwhile
             if warn_show and _warn_msg_sz and warn_buf_lock.acquire(False):
                 warn_msg_sz = _warn_msg_sz
@@ -904,7 +909,7 @@ async def data_fetch_task():
                 #     warn_msg = "Störung: Bus 100: Derzeit fährt die Linie nicht. Bitte nutzen Sie alternativ die U5. (S+U Alexanderplatz Bhf - U Bundestag) *** "
                 # compare by text, not id: the id can change while the
                 # text stays the same (duplicate warnings), or vice versa
-                warn_msg_update(warn_msg)
+                set_warn_msg(warn_msg)
                 print("updated data")
         return False
 
@@ -978,7 +983,7 @@ async def check_night_time_task():
             if _dimming != dim:
                 print("changing dimming")
                 _dimming = dim
-                warn_msg_update()
+                render_warn_msg()
         except Exception as e:
             crashlog.print_error("night time check failed", e)
 
