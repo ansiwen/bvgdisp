@@ -331,10 +331,7 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
         if cursor_x >= clip:
             # invisible
             break
-        if bold:
-            glyph = font.get("*" + char)
-        if not bold or glyph == None:
-            glyph = font.get(char)
+        glyph = (bold and font.get("*" + char)) or font.get(char)
         if glyph is None:
             print("missing character:", char)
             continue
@@ -356,22 +353,24 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
             # invisible
             cursor_x += width
             continue
-        for row in range(height):
-            byte_val = glyph[row + 1]
-            if kerning:
-                last_col |= (byte_val&2)<<row
-            if not disp:
-                continue
-            for col in range(width):
-                px = cursor_x + col
-                if px >= clip:
-                    # invisible
-                    break
-                if px < x:
-                    # invisible
+        # when only measuring, the rows matter just for kerning
+        if disp or kerning:
+            for row in range(height):
+                byte_val = glyph[row + 1]
+                if kerning:
+                    last_col |= (byte_val&2)<<row
+                if not disp:
                     continue
-                if byte_val & (0x1 << (width - col)):
-                    disp.pixel(px, y + row)
+                for col in range(width):
+                    px = cursor_x + col
+                    if px >= clip:
+                        # invisible
+                        break
+                    if px < x:
+                        # invisible
+                        continue
+                    if byte_val & (0x1 << (width - col)):
+                        disp.pixel(px, y + row)
         # Move cursor for next character
         cursor_x += width
         if not kerning:
