@@ -300,40 +300,39 @@ def banner():
         h75.set_pixel(127 - i, pos_y, 0, 0, 0)
 
 
-@micropython.native
+_type_colors = {
+    "tram": (190, 20, 20),
+    "regional": (190, 20, 20),
+    "bus": (149, 39, 110),
+    "suburban": (0, 141, 79),
+    "subway": (17, 93, 145),
+}
+
+_subway_colors = {
+    "U1": (125, 173, 76),
+    "U2": (218, 66, 30),
+    "U3": (0, 122, 91),
+    "U4": (240, 215, 34),
+    "U5": (126, 83, 48),
+    "U55": (126, 83, 48),
+    "U6": (140, 109, 171),
+    "U7": (82, 141, 186),
+    "U8": (34, 79, 134),
+    "U9": (243, 121, 29),
+}
+
 def typ2col(t, l, subcol):
     """Return color tuple for transport type and line"""
-    if t == "tram" or t == "regional":
-        return (190, 20, 20)
-    elif t == "bus":
-        return (149, 39, 110)
-    elif t == "suburban":
-        return (0, 141, 79)
-    elif t == "subway":
-        if subcol:
-            if l == "U1":
-                return (125, 173, 76)
-            elif l == "U2":
-                return (218, 66, 30)
-            elif l == "U3":
-                return (0, 122, 91)
-            elif l == "U4":
-                return (240, 215, 34)
-            elif l == "U5" or l == "U55":
-                return (126, 83, 48)
-            elif l == "U6":
-                return (140, 109, 171)
-            elif l == "U7":
-                return (82, 141, 186)
-            elif l == "U8":
-                return (34, 79, 134)
-            elif l == "U9":
-                return (243, 121, 29)
-            else:
-                print("Unkown subway:", l)
-        return (17, 93, 145)
-    print("Unkown type:", t)
-    return _WHITE
+    if t == "subway" and subcol:
+        color = _subway_colors.get(l)
+        if color:
+            return color
+        print("Unknown subway:", l)
+    color = _type_colors.get(t)
+    if color is None:
+        print("Unknown type:", t)
+        return _WHITE
+    return color
 
 @micropython.native
 def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
