@@ -807,96 +807,101 @@ def clean_name(s):
     s = s.replace("  ", " ")
     return s.strip()
 
+def set_clock(response):
+    """Set the RTC from the response's Date header. Returns True on the
+    first call, when the clock wasn't set before."""
+    global _time_set
+    # header names keep the server's case, e.g. "date" via a proxy
+    date = response._get_header("date", None)
+    if not date:
+        raise ValueError("response has no Date header")
+    date = parse_http_date(date)
+    old_t = time.time()
+    _rtc.datetime(date)
+    if not _time_set:
+        _time_set = True
+        print("time set")
+        return True
+    diff = time.time() - old_t
+    if diff < -1 or diff > 1:
+        print("time diff:", diff)
+    return False
+
+def parse_departures(deps, filtered):
+    """Return (line, typ, dest, when, bg) tuples, skipping bad entries."""
+    new_data = []
+    for dep in deps:
+        try:
+            when = dep["when"]
+            if not when:
+                continue
+            when = parse_iso_to_epoch(when)
+            line_obj = dep["line"]
+            line = line_obj["name"]
+            if line in filtered:
+                continue
+            typ = line_obj["product"]
+            dest = clean_name(dep["direction"])
+            bg = parse_color((line_obj.get("color") or {}).get("bg"))
+            new_data.append((line, typ, dest, when, bg))
+        except Exception as e:
+            # skip just this one, e.g. "direction": null
+            print("skipping bad departure:", e)
+    return new_data
+
+def pick_warning(warnings, now):
+    """Return the ticker text of the most important currently valid
+    warning, or "" if there is none."""
+    warn_msg = ""
+    prio_min = 100
+    for warn in warnings:
+        try:
+            prio = warn["priority"]
+            # missing or null validity means open-ended
+            valid_from = warn.get("validFrom")
+            valid_until = warn.get("validUntil")
+            if (prio >= prio_min
+                    and (not valid_from or now >= parse_iso_to_epoch(valid_from))
+                    and (not valid_until or now <= parse_iso_to_epoch(valid_until))):
+                summary = warn["summary"]
+                text = clean_name(warn["text"].split("\n")[0])
+                warn_msg = f'{summary}: {text} *** '
+                prio_min = prio+1
+        except Exception as e:
+            print("skipping bad warning:", e)
+    return warn_msg
+
 async def data_fetch_task():
     """Fetches data every 10 seconds"""
     print("fetch task started")
 
     async def fetch(params):
         """One request. Returns True if the next one should follow right away."""
-        global _dep_data, _time_set
+        global _dep_data
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f'{settings.get("API_URL")}/stops/{settings.get("STATION_ID")}/departures',
                 params=params,
             ) as response:
-                # print("got response")
-                if response.status == 200:
-                    # header names keep the server's case, e.g. "date" via a proxy
-                    date = response._get_header("date", None)
-                    if not date:
-                        raise ValueError("response has no Date header")
-                    date = parse_http_date(date)
-                    old_t = time.time()
-                    _rtc.datetime(date)
-                    if _time_set:
-                        diff = time.time() - old_t
-                        if diff < -1 or diff > 1:
-                            print("time diff:", diff)
-
-                    if not _time_set:
-                        _time_set = True
-                        print("time set")
-                        return True
-
-                    parse_start_ms = time.ticks_ms()
-                    # Stream parse JSON response
-                    data = await response.json()
-                    print(
-                        "parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms)
-                    )
-
-                    # Process parsed departures
-                    new_data = []
-                    filtered = settings.get("FILTERED")
-                    for dep in data["departures"]:
-                        try:
-                            when = dep["when"]
-                            if not when:
-                                continue
-                            when = parse_iso_to_epoch(when)
-                            line_obj = dep["line"]
-                            line = line_obj["name"]
-                            if line in filtered:
-                                continue
-                            typ = line_obj["product"]
-                            # Clean up destination
-                            dest = clean_name(dep["direction"])
-                            bg = parse_color((line_obj.get("color") or {}).get("bg"))
-
-                            new_data.append((line, typ, dest, when, bg))
-                        except Exception as e:
-                            # skip just this one, e.g. "direction": null
-                            print("skipping bad departure:", e)
-                    # new_data[1] = (new_data[1][0], new_data[1][1], "S+U Zoologischer Garten", new_data[1][3], new_data[1][4])
-                    _dep_data = new_data
-                    warn_msg = ""
-                    prio_min = 100
-                    for warn in data["warnings"]:
-                        try:
-                            #print("warn:", warn)
-                            now = time.time()
-                            prio = warn["priority"]
-                            # missing or null validity means open-ended
-                            valid_from = warn.get("validFrom")
-                            valid_until = warn.get("validUntil")
-                            if (prio >= prio_min
-                                    and (not valid_from or now >= parse_iso_to_epoch(valid_from))
-                                    and (not valid_until or now <= parse_iso_to_epoch(valid_until))):
-                                summary = warn["summary"]
-                                text = clean_name(warn["text"].split("\n")[0])
-                                warn_msg = f'{summary}: {text} *** '
-                                prio_min = prio+1
-                        except Exception as e:
-                            print("skipping bad warning:", e)
-                    # if not warn_msg:
-                    #     # warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
-                    #     warn_msg = "Störung: Bus 100: Derzeit fährt die Linie nicht. Bitte nutzen Sie alternativ die U5. (S+U Alexanderplatz Bhf - U Bundestag) *** "
-                    # compare by text, not id: the id can change while the
-                    # text stays the same (duplicate warnings), or vice versa
-                    warn_msg_update(warn_msg)
-                    print("updated data")
-                else:
+                if response.status != 200:
                     print("fetch failed:", response.status)
+                    return False
+                if set_clock(response):
+                    return True
+
+                parse_start_ms = time.ticks_ms()
+                data = await response.json()
+                print("parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms))
+
+                _dep_data = parse_departures(data["departures"], settings.get("FILTERED"))
+                warn_msg = pick_warning(data["warnings"], time.time())
+                # if not warn_msg:
+                #     # warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
+                #     warn_msg = "Störung: Bus 100: Derzeit fährt die Linie nicht. Bitte nutzen Sie alternativ die U5. (S+U Alexanderplatz Bhf - U Bundestag) *** "
+                # compare by text, not id: the id can change while the
+                # text stays the same (duplicate warnings), or vice versa
+                warn_msg_update(warn_msg)
+                print("updated data")
         return False
 
     while True:
