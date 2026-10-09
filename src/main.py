@@ -80,12 +80,21 @@ _row_y0 = 1 if _disp_height == 64 else 0
 _row_height = 9 if _disp_height == 64 else 8
 _n_textlines = (_disp_height - _row_y0) // _row_height
 
-_dest_offset = 0
-
 _h75 = Hub75(_disp_width, _disp_height, color_order=hw_conf.COLOR_ORDER)
 _h75.start()
 
-_dimming = 10
+# State shared between the tasks and the display thread. The warning
+# ticker's state is set up after banner(), see the end of this file.
+_dimming = 10  # 0-10, set by check_night_time_task
+_dest_offset = 0  # x of the DEST column, set by render_task
+_textlines = []  # text row buffers, allocated by render_task
+_dep_data = None  # departures, published by data_fetch_task
+_time_set = False  # RTC was set from a response's Date header
+_safe_to_fetch = asyncio.Event()  # render_task finished a cycle
+_safe_to_fetch.set()
+_disp_thread_stop = False
+_disp_thread_lock = _thread.allocate_lock()  # held while display_thread runs
+_disp_thread_crash = None  # backtrace text, written to flash by core 0
 
 @micropython.native
 def set_pen(disp, color):
@@ -449,10 +458,6 @@ def render_warn_msg():
         _warn_msg_sz = min(msg_size, _WARN_BUF_SZ)
     print("updated warn message")
 
-_disp_thread_stop = False
-_disp_thread_lock = _thread.allocate_lock()
-_disp_thread_crash = None  # backtrace text, written to flash by core 0
-
 _separator = " - "
 _separator_sz = render_text(_separator, kerning=True)
 
@@ -588,10 +593,6 @@ def asyncio_exception_handler(loop, context):
         print("asyncio error:", context.get("message"))
         return
     crashlog.log_exception("task " + str(context.get("future")), e)
-
-_dep_data = None
-_safe_to_fetch = asyncio.Event()
-_safe_to_fetch.set()
 
 # states of a textline that is blank
 _empty_states = ["", "", "", 0, 0, False]
@@ -757,8 +758,6 @@ async def render_task():
         else:
             print("render_task took too long:", delay)
             t1 = time.ticks_add(t1, -delay)
-
-_time_set = False
 
 def parse_color(s):
     if not s:
@@ -979,7 +978,8 @@ banner()
 
 gc.collect()
 
-_warn_buf  = make_textbuf(_WARN_BUF_SZ)
+# only now: the big ticker buffer needs the memory banner() just freed
+_warn_buf = make_textbuf(_WARN_BUF_SZ)
 _warn_buf_lock = _thread.allocate_lock()
 _warn_msg = ""
 _warn_msg_sz = 0
