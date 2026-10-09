@@ -624,11 +624,77 @@ _dep_data = None
 _safe_to_fetch = asyncio.Event()
 _safe_to_fetch.set()
 
+# states of a textline that is blank
+_empty_states = ["", "", "", 0, 0, False]
+
+def render_row(i, eta_s, blinking, line, typ, dest, bg_col, line_width, force, colored, sub_colors):
+    """Redraw the changed columns of text row i, each under its own lock.
+    Returns (width of the line name, whether DEST was redrawn)."""
+    tl_buf, _, locks, states = _textlines[i]
+    line_size = render_text(line, bold=True, kerning=True)
+
+    # render ETA at beginning of textline buffer
+    if eta_s != states[_S_ETA] or force:
+        eta_size = render_text(eta_s)
+        with locks[_S_ETA]:
+            tl_buf.set_pen(_BG)
+            tl_buf.rectangle(0, 0, _ETA_WIDTH, 8)
+            if eta_s:
+                set_pen(tl_buf, _BVG)
+                render_text(eta_s, tl_buf, _ETA_WIDTH - eta_size + 1, 0, clip=_ETA_WIDTH)
+            states[_S_ETA] = eta_s
+            states[_S_BLINKING] = blinking
+            print(f"updated ETA of line {i}")
+
+    # then render LINE
+    if line != states[_S_LINE] or force:
+        line_offset = max(line_width - line_size, 0)
+        with locks[_S_LINE]:
+            tl_buf.set_pen(_BG)
+            tl_buf.rectangle(_ETA_WIDTH, 0, line_width, 8)
+            if sub_colors and bg_col:
+                set_pen(tl_buf, bg_col)
+            elif colored:
+                set_pen(tl_buf, typ2col(typ, line, sub_colors))
+            else:
+                set_pen(tl_buf, _BVG)
+            render_text(line, tl_buf, _ETA_WIDTH + line_offset, 0, bold=True, clip=_ETA_WIDTH+line_width, kerning=True)
+            states[_S_LINE] = line
+            print(f"updated LINE of line {i}")
+
+    # last is DEST, because it has flexible length
+    if dest != states[_S_DEST] or force:
+        with locks[_S_DEST]:
+            tl_buf.set_pen(_BG)
+            tl_buf.rectangle(_ETA_WIDTH + line_width, 0, _TEXT_BUF_SZ - _ETA_WIDTH - line_width, 8)
+            set_pen(tl_buf, _BVG)
+            states[_S_DEST_SZ] = render_text(dest + _separator, tl_buf, _ETA_WIDTH + line_width, 0, clip=_TEXT_BUF_SZ - _ETA_WIDTH - line_width, kerning=True) - _separator_sz
+            states[_S_DEST] = dest
+            # reset now, so the display thread never combines the
+            # new dest size with the old scroll offset; render_task
+            # resets all updated rows again to scroll in sync
+            states[_S_DEST_X] = _DEST_SCROLL_INIT
+            print(f"updated DEST of line {i}")
+        return line_size, True
+    return line_size, False
+
+def clear_row(i):
+    """Blank text row i, unless it is blank already."""
+    tl_buf, _, locks, states = _textlines[i]
+    if states == _empty_states:
+        return
+    for lock in locks:
+        lock.acquire()
+    tl_buf.set_pen(_BG)
+    tl_buf.clear()
+    states[:] = _empty_states
+    for lock in locks:
+        lock.release()
+
 async def render_task():
     global _dest_offset, _textlines
     print("render task started")
     await asyncio.sleep(5) # give a chance to read the IP address
-    start_ms = 0
     colored = False
     sub_colors = False
     print("waiting for first data")
@@ -637,14 +703,13 @@ async def render_task():
         await asyncio.sleep_ms(100)
     gc.collect()
     # _textlines[row] structure: ETA|LINE|DEST
-    zero_states = ["", "", "", 0, 0, False]
     _textlines = []
     for _ in range(_n_textlines):
         buf, mv = make_textbuf(_TEXT_BUF_SZ)
         _textlines.append((
             buf, mv,
             (_thread.allocate_lock(), _thread.allocate_lock(),_thread.allocate_lock()),
-            zero_states[:]
+            _empty_states[:]
         ))
 
     _thread.start_new_thread(display_thread, ())
@@ -658,23 +723,17 @@ async def render_task():
         try:
             data = _dep_data
             now = time.time()
-            force_update = False
-            def update(old, new):
-                nonlocal force_update
-                if old != new:
-                    force_update = True
-                return new
             walk_delay = settings.get("WALK_DELAY")
-            colored = update(colored, settings.get("COLORED"))
-            sub_colors = update(sub_colors, settings.get("SUBWAY_COLORS"))
+            new_colored = settings.get("COLORED")
+            new_sub_colors = settings.get("SUBWAY_COLORS")
+            force_update = (new_colored != colored or new_sub_colors != sub_colors
+                            or _dimming != dim)
+            colored, sub_colors, dim = new_colored, new_sub_colors, _dimming
             if settings.check():
                 line_size_max = _LINE_MIN_WIDTH
             dest_offset = line_size_max + _COL_GAP
             if _dest_offset != dest_offset:
                 _dest_offset = dest_offset
-                force_update = True
-            if _dimming != dim:
-                dim = _dimming
                 force_update = True
             line_width = line_size_max
             i = 0
@@ -696,78 +755,23 @@ async def render_task():
                 else:
                     eta_s = str(eta_n) + "'"
 
-                line_size = render_text(line, bold=True, kerning=True)
+                line_size, dest_updated = render_row(
+                    i, eta_s, blinking, line, typ, dest, bg_col,
+                    line_width, force_update, colored, sub_colors)
                 line_size_max = max(line_size_max, line_size)
-                line_offset = max(line_width - line_size, 0)
-                eta_size = 0
-                if eta_s:
-                    eta_size = render_text(eta_s)
-
-                tl_buf, _, locks, states = _textlines[i]
-
-                # render ETA at beginning of textline buffer
-                if eta_s != states[_S_ETA] or force_update:
-                    with locks[_S_ETA]:
-                        tl_buf.set_pen(_BG)
-                        tl_buf.rectangle(0, 0, _ETA_WIDTH, 8)
-                        if eta_s:
-                            set_pen(tl_buf, _BVG)
-                            render_text(eta_s, tl_buf, _ETA_WIDTH - eta_size + 1, 0, clip=_ETA_WIDTH)
-                        states[_S_ETA] = eta_s
-                        states[_S_BLINKING] = blinking
-                        print(f"updated ETA of line {i}")
-
-                # then render LINE
-                if line != states[_S_LINE] or force_update:
-                    with locks[_S_LINE]:
-                        tl_buf.set_pen(_BG)
-                        tl_buf.rectangle(_ETA_WIDTH, 0, line_width, 8)
-                        if sub_colors and bg_col:
-                            set_pen(tl_buf, bg_col)
-                        elif colored:
-                            set_pen(tl_buf, typ2col(typ, line, sub_colors))
-                        else:
-                            set_pen(tl_buf, _BVG)
-                        render_text(line, tl_buf, _ETA_WIDTH + line_offset, 0, bold=True, clip=_ETA_WIDTH+line_width, kerning=True)
-                        states[_S_LINE] = line
-                        print(f"updated LINE of line {i}")
-
-                # last is DEST, because it has flexible length
-                if dest != states[_S_DEST] or force_update:
-                    with locks[_S_DEST]:
-                        tl_buf.set_pen(_BG)
-                        tl_buf.rectangle(_ETA_WIDTH + line_width, 0, _TEXT_BUF_SZ - _ETA_WIDTH - line_width, 8)
-                        set_pen(tl_buf, _BVG)
-                        states[_S_DEST_SZ] = render_text(dest + _separator, tl_buf, _ETA_WIDTH + line_width, 0, clip=_TEXT_BUF_SZ - _ETA_WIDTH - line_width, kerning=True) - _separator_sz
-                        states[_S_DEST] = dest
-                        # reset now, so the display thread never combines the
-                        # new dest size with the old scroll offset; all
-                        # updated rows get reset again below to scroll in sync
-                        states[_S_DEST_X] = _DEST_SCROLL_INIT
-                        reset_dest_x.append(i)
-                        print(f"updated DEST of line {i}")
+                if dest_updated:
+                    reset_dest_x.append(i)
                 i += 1
 
+            # restart the scrolling of all updated rows together
             for j in reset_dest_x:
-                locks = _textlines[j][2]
-                locks[_S_DEST].acquire()
+                _textlines[j][2][_S_DEST].acquire()
+                _textlines[j][3][_S_DEST_X] = _DEST_SCROLL_INIT
             for j in reset_dest_x:
-                states = _textlines[j][3]
-                states[_S_DEST_X] = _DEST_SCROLL_INIT
-            for j in reset_dest_x:
-                locks = _textlines[j][2]
-                locks[_S_DEST].release()
+                _textlines[j][2][_S_DEST].release()
 
-            # Clear any unused rows
             for j in range(i, _n_textlines):
-                disp, _, locks, states = _textlines[j]
-                for lock in locks:
-                    lock.acquire()
-                disp.set_pen(_BG)
-                disp.clear()
-                states[:] = zero_states[:]
-                for lock in locks:
-                    lock.release()
+                clear_row(j)
 
         except Exception as e:
             crashlog.print_error("render task failed", e)
