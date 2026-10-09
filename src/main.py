@@ -487,7 +487,11 @@ def display_thread():
         n_textlines = _n_textlines
         warn_y = row_y0 + (row_h * (n_textlines-1))
         separator_sz = _separator_sz
-        t1 = time.ticks_ms()
+        # ticks_ms() wraps at 2**30 ms (~12.4 days): only compare via ticks_diff
+        ticks_ms = time.ticks_ms
+        ticks_add = time.ticks_add
+        ticks_diff = time.ticks_diff
+        t1 = ticks_ms()
         t_blink = t1
         t_warn = t1
         warn_show = False
@@ -501,10 +505,11 @@ def display_thread():
             dest_off = _dest_offset
             line_width = dest_off - _COL_GAP
             dest_width = disp_width - line_width - _ETA_WIDTH - 2*_COL_GAP
-            if t1 > t_warn + _WARN_PAUSE_MS:
-                if t1 > t_warn + _WARN_CYCLE_MS:
+            warn_dt = ticks_diff(t1, t_warn)
+            if warn_dt > _WARN_PAUSE_MS:
+                if warn_dt > _WARN_CYCLE_MS:
                     warn_show = False
-                    t_warn += _WARN_CYCLE_MS
+                    t_warn = ticks_add(t_warn, _WARN_CYCLE_MS)
                 else:
                     warn_show = True
             if warn_show and _warn_msg_sz:
@@ -564,15 +569,15 @@ def display_thread():
                         disp.rectangle(dest_off, row_y, dest_width, 8)
                         blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_sz)
                     locks[_S_DEST].release()
-            if t1 > t_blink:
-                t_blink += _BLINK_DELAY_MS
+            if ticks_diff(t1, t_blink) > 0:
+                t_blink = ticks_add(t_blink, _BLINK_DELAY_MS)
                 blink_hide = not blink_hide
             # elapsed = time.ticks_diff(time.ticks_ms(), t1)
             # print("elapsed", elapsed)
             # busy loop on core 2 to avoid flickering
-            t1 += _FRAME_DELAY_MS
+            t1 = ticks_add(t1, _FRAME_DELAY_MS)
             while True:
-                if time.ticks_ms() >= t1:
+                if ticks_diff(ticks_ms(), t1) >= 0:
                     break
             h75.update(disp)
     except Exception as e:
@@ -757,14 +762,14 @@ async def render_task():
         _safe_to_fetch.set()  # Wake up fetch task
         await asyncio.sleep_ms(0) # Yield to let fetch see signal
         _safe_to_fetch.clear()  # Clear immediately (edge-trigger)
-        t1 += _RENDER_CYCLE_MS
+        t1 = time.ticks_add(t1, _RENDER_CYCLE_MS)
         delay = time.ticks_diff(t1, time.ticks_ms())
         #print("render delay:", delay)
         if delay > 0:
             await asyncio.sleep_ms(delay)
         else:
             print("render_task took too long:", delay)
-            t1 -= delay
+            t1 = time.ticks_add(t1, -delay)
 
 _time_set = False
 
