@@ -449,13 +449,14 @@ def blit(dest: ptr32, src: ptr32, dst_off: uint, dst_width: uint, src_off: uint,
 def warn_msg_update(msg=None):
     global _warn_msg, _warn_msg_sz
     warn_buf = _warn_buf[0]
-    _warn_msg_sz = 0
     if msg == None:
         msg = _warn_msg
     else:
         if _warn_msg == msg:
             return
         _warn_msg = msg
+    # hide the ticker while it's re-rendered (or gone)
+    _warn_msg_sz = 0
     if not msg:
         return
     msg_size = render_text(msg, None, kerning=True, clip=None)
@@ -795,12 +796,10 @@ def parse_color(s):
 async def data_fetch_task():
     """Fetches data every 10 seconds"""
     print("fetch task started")
-    current_warn_id = 0
 
     async def fetch(params):
         """One request. Returns True if the next one should follow right away."""
         global _dep_data, _time_set
-        nonlocal current_warn_id
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f'{settings.get("API_URL")}/stops/{settings.get("STATION_ID")}/departures',
@@ -860,7 +859,6 @@ async def data_fetch_task():
                             print("skipping bad departure:", e)
                     # new_data[1] = (new_data[1][0], new_data[1][1], "S+U Zoologischer Garten", new_data[1][3], new_data[1][4])
                     _dep_data = new_data
-                    warn_id = 0
                     warn_msg = ""
                     prio_min = 100
                     for warn in data["warnings"]:
@@ -879,20 +877,16 @@ async def data_fetch_task():
                                 text = text.replace(" [Endstelle]", "")
                                 text = text.replace(" (Berlin)", "")
                                 text = text.replace("  ", " ")
-                                # set together, so a bad field can't pair one
-                                # warning's id with another one's text
-                                warn_id = warn["id"]
                                 warn_msg = f'{summary}: {text} *** '
                                 prio_min = prio+1
                         except Exception as e:
                             print("skipping bad warning:", e)
-                    # if not warn_id:
-                    #     warn_id = 99
+                    # if not warn_msg:
                     #     # warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
                     #     warn_msg = "Störung: Bus 100: Derzeit fährt die Linie nicht. Bitte nutzen Sie alternativ die U5. (S+U Alexanderplatz Bhf - U Bundestag) *** "
-                    if warn_id != current_warn_id:
-                        current_warn_id = warn_id
-                        warn_msg_update(warn_msg)
+                    # compare by text, not id: the id can change while the
+                    # text stays the same (duplicate warnings), or vice versa
+                    warn_msg_update(warn_msg)
                     print("updated data")
                 else:
                     print("fetch failed:", response.status)
