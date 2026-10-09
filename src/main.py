@@ -805,7 +805,11 @@ async def data_fetch_task():
             ) as response:
                 # print("got response")
                 if response.status == 200:
-                    date = parse_http_date(response.headers["Date"])
+                    # header names keep the server's case, e.g. "date" via a proxy
+                    date = response._get_header("date", None)
+                    if not date:
+                        raise ValueError("response has no Date header")
+                    date = parse_http_date(date)
                     old_t = time.time()
                     _rtc.datetime(date)
                     if _time_set:
