@@ -176,14 +176,13 @@ def network_connect(SSID, PSK):
     return False
 
 
-def connectivity_test(host="1.1.1.1", port=80, timeout=60):
-    """Minimal blocking TCP connectivity test. Returns True if connected."""
+def ensure_internet_or_reset(host="1.1.1.1", port=80, timeout=60):
+    """Blocking TCP connectivity test. Resets the device if it fails."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout)
         s.connect((host, port))
         s.close()
-        return True
     except Exception as e:
         crashlog.print_error("Connectivity test failed", e)
         console("No Internet. Restarting...")
@@ -979,7 +978,7 @@ async def main():
     if ap_mode:
         start_ap_mode()
     else:
-        connectivity_test()
+        ensure_internet_or_reset()
         console("connected to internet")
 
     # Start web server for settings configuration
