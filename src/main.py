@@ -137,31 +137,29 @@ def start_ap_mode():
     console("Connect to WiFi:")
     console("  BVGdisplay")
     console(f"Open: http://{ip}")
-    print(f"AP Mode active. IP: {ip}")
-    return ip
 
 
 def network_connect(SSID, PSK):
     """Try to connect to WiFi. Returns True on success, False on failure."""
-    for i in range(6):
+    for _ in range(6):
         _wlan.disconnect()
         while _wlan.active():
             _wlan.active(False)
         while not _wlan.active():
             _wlan.active(True)
-        # Sets the Wireless LED pulsing and attempts to connect to your local network.
         console(f"connecting to {SSID}...", clear=True)
         _wlan.config(pm=0xA11140)  # Turn WiFi power saving off for some slow APs
         _wlan.connect(SSID, PSK)
 
-        for j in range(10):
-            print("_wlan.status:", _wlan.status())
-            if _wlan.status() < 0 or _wlan.status() >= 3:
+        for _ in range(10):
+            status = _wlan.status()
+            print("_wlan.status:", status)
+            # negative: failed, 3: got an IP
+            if status < 0 or status >= 3:
                 break
             print("waiting for connection...")
             time.sleep(1)
 
-        # Handle connection error. Switches the Warn LED on.
         if _wlan.isconnected():
             print("connected")
             ip = _wlan.ifconfig()[0]
