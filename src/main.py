@@ -23,6 +23,7 @@ _FRAME_RATE = const(25)
 _DEST_SCROLL_DELAY = const(5)
 _BLINK_DELAY_MS = const(600)
 _FETCH_DELAY = const(10)
+_FETCH_TIMEOUT = const(20)
 _RENDER_CYCLE_MS = const(1000)
 _WARN_DURATION_MS = const(45 * 1000)
 _WARN_PAUSE_MS = const(30 * 1000)
@@ -786,9 +787,94 @@ def parse_color(s):
 
 async def data_fetch_task():
     """Fetches data every 10 seconds"""
-    global _dep_data, _time_set
     print("fetch task started")
     current_warn_id = 0
+
+    async def fetch(params):
+        """One request. Returns True if the next one should follow right away."""
+        global _dep_data, _time_set
+        nonlocal current_warn_id
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f'{settings.get("API_URL")}/stops/{settings.get("STATION_ID")}/departures',
+                params=params,
+            ) as response:
+                # print("got response")
+                if response.status == 200:
+                    date = parse_http_date(response.headers["Date"])
+                    old_t = time.time()
+                    _rtc.datetime(date)
+                    if _time_set:
+                        diff = time.time() - old_t
+                        if diff < -1 or diff > 1:
+                            print("time diff:", diff)
+
+                    if not _time_set:
+                        _time_set = True
+                        print("time set")
+                        return True
+
+                    parse_start_ms = time.ticks_ms()
+                    # Stream parse JSON response
+                    data = await response.json()
+                    print(
+                        "parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms)
+                    )
+
+                    # Process parsed departures
+                    new_data = []
+                    filtered = settings.get("FILTERED")
+                    for dep in data["departures"]:
+                        when = dep["when"]
+                        if not when:
+                            continue
+                        when = parse_iso_to_epoch(when)
+                        line_obj = dep["line"]
+                        line = line_obj["name"]
+                        if line in filtered:
+                            continue
+                        typ = line_obj["product"]
+                        # Clean up destination
+                        dest = dep["direction"] #.split(", ")[-1]
+                        dest = dest.replace(" [Endstelle]", "")
+                        dest = dest.replace(" (Berlin)", "")
+                        dest = dest.replace("  ", " ")
+                        dest = dest.strip()
+                        bg = parse_color(line_obj.get("color", {}).get("bg"))
+
+                        new_data.append((line, typ, dest, when, bg))
+                    # new_data[1] = (new_data[1][0], new_data[1][1], "S+U Zoologischer Garten", new_data[1][3], new_data[1][4])
+                    _dep_data = new_data
+                    warn_id = 0
+                    warn_msg = ""
+                    prio_min = 100
+                    for warn in data["warnings"]:
+                        #print("warn:", warn)
+                        now = time.time()
+                        prio = warn["priority"]
+                        if (prio >= prio_min
+                                and now >= parse_iso_to_epoch(warn["validFrom"])
+                                and now <= parse_iso_to_epoch(warn["validUntil"])):
+                            warn_id = warn["id"]
+                            summary = warn["summary"]
+                            text = warn["text"].split("\n")[0]
+                            text = text.replace(" [Endstelle]", "")
+                            text = text.replace(" (Berlin)", "")
+                            text = text.replace("  ", " ")
+                            warn_msg = f'{summary}: {text} *** '
+                            prio_min = prio+1
+                    # if not warn_id:
+                    #     warn_id = 99
+                    #     # warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
+                    #     warn_msg = "Störung: Bus 100: Derzeit fährt die Linie nicht. Bitte nutzen Sie alternativ die U5. (S+U Alexanderplatz Bhf - U Bundestag) *** "
+                    if warn_id != current_warn_id:
+                        current_warn_id = warn_id
+                        warn_msg_update(warn_msg)
+                    print("updated data")
+                else:
+                    print("fetch failed:", response.status)
+        return False
+
     while True:
         try:
             await _safe_to_fetch.wait()
@@ -809,86 +895,12 @@ async def data_fetch_task():
             if not settings.get("SHOW_FERRY"): params["ferry"] = "false"
             if not settings.get("SHOW_EXPRESS"): params["express"] = "false"
             if _time_set: params["when"] = str(time.time() + int(settings.get("WALK_DELAY")))
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f'{settings.get("API_URL")}/stops/{settings.get("STATION_ID")}/departures',
-                    params=params,
-                ) as response:
-                    # print("got response")
-                    if response.status == 200:
-                        date = parse_http_date(response.headers["Date"])
-                        old_t = time.time()
-                        _rtc.datetime(date)
-                        if _time_set:
-                            diff = time.time() - old_t
-                            if diff < -1 or diff > 1:
-                                print("time diff:", diff)
-
-                        if not _time_set:
-                            _time_set = True
-                            print("time set")
-                            continue
-
-                        parse_start_ms = time.ticks_ms()
-                        # Stream parse JSON response
-                        data = await response.json()
-                        print(
-                            "parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms)
-                        )
-
-                        # Process parsed departures
-                        new_data = []
-                        filtered = settings.get("FILTERED")
-                        for dep in data["departures"]:
-                            when = dep["when"]
-                            if not when:
-                                continue
-                            when = parse_iso_to_epoch(when)
-                            line_obj = dep["line"]
-                            line = line_obj["name"]
-                            if line in filtered:
-                                continue
-                            typ = line_obj["product"]
-                            # Clean up destination
-                            dest = dep["direction"] #.split(", ")[-1]
-                            dest = dest.replace(" [Endstelle]", "")
-                            dest = dest.replace(" (Berlin)", "")
-                            dest = dest.replace("  ", " ")
-                            dest = dest.strip()
-                            bg = parse_color(line_obj.get("color", {}).get("bg"))
-
-                            new_data.append((line, typ, dest, when, bg))
-                        # new_data[1] = (new_data[1][0], new_data[1][1], "S+U Zoologischer Garten", new_data[1][3], new_data[1][4])
-                        _dep_data = new_data
-                        warn_id = 0
-                        warn_msg = ""
-                        prio_min = 100
-                        for warn in data["warnings"]:
-                            #print("warn:", warn)
-                            now = time.time()
-                            prio = warn["priority"]
-                            if (prio >= prio_min
-                                    and now >= parse_iso_to_epoch(warn["validFrom"])
-                                    and now <= parse_iso_to_epoch(warn["validUntil"])):
-                                warn_id = warn["id"]
-                                summary = warn["summary"]
-                                text = warn["text"].split("\n")[0]
-                                text = text.replace(" [Endstelle]", "")
-                                text = text.replace(" (Berlin)", "")
-                                text = text.replace("  ", " ")
-                                warn_msg = f'{summary}: {text} *** '
-                                prio_min = prio+1
-                        # if not warn_id:
-                        #     warn_id = 99
-                        #     # warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
-                        #     warn_msg = "Störung: Bus 100: Derzeit fährt die Linie nicht. Bitte nutzen Sie alternativ die U5. (S+U Alexanderplatz Bhf - U Bundestag) *** "
-                        if warn_id != current_warn_id:
-                            current_warn_id = warn_id
-                            warn_msg_update(warn_msg)
-                        print("updated data")
-                    else:
-                        print("fetch failed:", response.status)
-
+            # aiohttp has no timeouts: without this, a server or link that stops
+            # responding mid-request would hang the fetch task forever
+            if await asyncio.wait_for(fetch(params), _FETCH_TIMEOUT):
+                continue
+        except asyncio.TimeoutError:
+            print("fetch timed out")
         except Exception as e:
             import sys
 
