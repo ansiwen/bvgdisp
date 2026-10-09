@@ -47,6 +47,9 @@ _FRAME_DELAY_MS = const(1000//_FRAME_RATE)
 _DEST_SCROLL_INIT = const(-_FRAME_RATE*_DEST_SCROLL_DELAY)
 _WARN_CYCLE_MS = const(_WARN_DURATION_MS+_WARN_PAUSE_MS)
 _LINE_MIN_WIDTH = const(13)
+# seconds added before flooring the ETA to minutes, so it rounds up from
+# 15 s past a full minute: 0-14 s shows "now", 15-74 s 1', 75 s 2'
+_ETA_ROUND_S = const(45)
 
 # Reset the device when the program crashes. Set to False for debugging,
 # to keep the device stopped at the REPL after the backtrace.
@@ -717,7 +720,7 @@ async def render_task():
                 if i >= _n_textlines:
                     break
 
-                eta_n = when - now + 45
+                eta_n = when - now + _ETA_ROUND_S
                 if eta_n < walk_delay:
                     continue
 
@@ -928,9 +931,9 @@ async def check_night_time_task():
         try:
             # RTC is UTC, apply timezone offset
             tz_offset = settings.get("TIMEZONE") or 0
-            current_minutes = (now[4] + tz_offset) * 60 + now[5]  # (hours + tz) * 60 + minutes
-            # Normalize to 0-1439 range (24 hours = 1440 minutes)
-            current_minutes = current_minutes % 1440 + 1
+            # the check runs at second 55 (see the sleep below), so judge
+            # by the coming minute; the % below wraps it into the day
+            current_minutes = (now[4] + tz_offset) * 60 + now[5] + 1
 
             start = settings.get("NIGHT_START")
             end = settings.get("NIGHT_END")
@@ -956,6 +959,7 @@ async def check_night_time_task():
         except Exception as e:
             crashlog.print_error("night time check failed", e)
 
+        # wake up at the next second 55 that is at least 26 s away
         await asyncio.sleep(85 - (now[6] + 30) % 60)
 
 # Main entry point
