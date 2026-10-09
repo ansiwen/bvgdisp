@@ -33,7 +33,6 @@ _RED = const((120, 0, 0))
 _YELLOW = const((255, 180, 0))
 _BVG = const((255, 170, 0))
 _WHITE = const((255, 255, 255))
-#_BG = const((4 << 16) + (4 << 8) + 4)
 _BG = const(0)
 
 _S_ETA = const(0)
@@ -333,17 +332,11 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
         width = glyph[0] - 1
         if kerning:
             for row in range(height):
-                # if bold:
-                #     check = glyph[row + 1] >> width and ((last_col & (0b10<<row)) != 0)
-                # else:
                 check = glyph[row + 1] >> width and ((last_col & (0b111<<row)) != 0)
                 if check:
                     cursor_x += 1
                     break
             last_col = 0
-        # if cursor_x + width > clip:
-        #     # don't print partial character
-        #     break
         if cursor_x + width + 8 <= x:
             # invisible
             cursor_x += width
@@ -536,7 +529,6 @@ def display_thread():
                 # DEST column
                 if locks[_S_DEST].acquire(False):
                     dest_sz = states[_S_DEST_SZ]
-                    #print("i:", i, "dest_sz: ", dest_sz, "dest_width:", dest_width)
                     show = True
                     if states[_S_BLINKING] and blink_hide:
                         disp.rectangle(dest_off, row_y, dest_width, 8)
@@ -554,7 +546,6 @@ def display_thread():
                         states[_S_DEST_X] = next_x
                         if x < 0:
                             x = 0
-                        #print("x: ", x)
                         if show:
                             if x > dest_sz-dest_width:
                                 blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_sz-x)
@@ -754,7 +745,6 @@ async def render_task():
         except Exception as e:
             crashlog.print_error("render task failed", e)
             print("last data:", data)
-        # print("---")
 
         # Signal fetch task: "I'm done, safe to run now"
         _safe_to_fetch.set()  # Wake up fetch task
@@ -762,7 +752,6 @@ async def render_task():
         _safe_to_fetch.clear()  # Clear immediately (edge-trigger)
         t1 = time.ticks_add(t1, _RENDER_CYCLE_MS)
         delay = time.ticks_diff(t1, time.ticks_ms())
-        #print("render delay:", delay)
         if delay > 0:
             await asyncio.sleep_ms(delay)
         else:
@@ -876,9 +865,6 @@ async def data_fetch_task():
 
                 _dep_data = parse_departures(data["departures"], settings.get("FILTERED"))
                 warn_msg = pick_warning(data["warnings"], time.time())
-                # if not warn_msg:
-                #     # warn_msg = "Unterbrechung: Tram M1: Die Linie fährt aufgrund von Bauarbeiten nicht zwischen S Hackescher Markt und S+U Friedrichstraße. Umfahrung: tagsüber M5, S3, S5, S7, S9 & nachts Ersatzverkehr M1 bis S+U Friedrichstraße (Am Kupfergraben). *** "
-                #     warn_msg = "Störung: Bus 100: Derzeit fährt die Linie nicht. Bitte nutzen Sie alternativ die U5. (S+U Alexanderplatz Bhf - U Bundestag) *** "
                 # compare by text, not id: the id can change while the
                 # text stays the same (duplicate warnings), or vice versa
                 set_warn_msg(warn_msg)
@@ -889,7 +875,6 @@ async def data_fetch_task():
         try:
             await _safe_to_fetch.wait()
             gc.collect()
-            # print("fetching data")
             params = {
                 "results": "14",
                 "duration": "60",
@@ -911,11 +896,7 @@ async def data_fetch_task():
             crashlog.print_error("Fetch task failed", e)
 
         print("memfree:", gc.mem_free())
-        # print("fetch finished")
         await asyncio.sleep(_FETCH_DELAY)
-
-
-        # print("waiting for finished display")
 
 
 async def check_night_time_task():
