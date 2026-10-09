@@ -800,6 +800,13 @@ def parse_color(s):
         r, g, b = int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
     return (r, g, b)
 
+def clean_name(s):
+    """Strip station name noise that wastes space on the panel."""
+    s = s.replace(" [Endstelle]", "")
+    s = s.replace(" (Berlin)", "")
+    s = s.replace("  ", " ")
+    return s.strip()
+
 async def data_fetch_task():
     """Fetches data every 10 seconds"""
     print("fetch task started")
@@ -853,11 +860,7 @@ async def data_fetch_task():
                                 continue
                             typ = line_obj["product"]
                             # Clean up destination
-                            dest = dep["direction"] #.split(", ")[-1]
-                            dest = dest.replace(" [Endstelle]", "")
-                            dest = dest.replace(" (Berlin)", "")
-                            dest = dest.replace("  ", " ")
-                            dest = dest.strip()
+                            dest = clean_name(dep["direction"])
                             bg = parse_color((line_obj.get("color") or {}).get("bg"))
 
                             new_data.append((line, typ, dest, when, bg))
@@ -880,10 +883,7 @@ async def data_fetch_task():
                                     and (not valid_from or now >= parse_iso_to_epoch(valid_from))
                                     and (not valid_until or now <= parse_iso_to_epoch(valid_until))):
                                 summary = warn["summary"]
-                                text = warn["text"].split("\n")[0]
-                                text = text.replace(" [Endstelle]", "")
-                                text = text.replace(" (Berlin)", "")
-                                text = text.replace("  ", " ")
+                                text = clean_name(warn["text"].split("\n")[0])
                                 warn_msg = f'{summary}: {text} *** '
                                 prio_min = prio+1
                         except Exception as e:
