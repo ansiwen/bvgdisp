@@ -11,6 +11,7 @@ _nonces = {}  # nonce -> expiry_time
 SESSION_TIMEOUT = 600  # 10 minutes in seconds
 NONCE_TIMEOUT = 60  # 1 minute for nonce validity
 MAX_BODY_SIZE = 4096  # settings JSON is well below 1 KB
+_CHUNK_SIZE = const(1024)  # bytes per write() when sending responses
 
 
 def _generate_hex(length=16):
@@ -1027,19 +1028,28 @@ async def parse_request(reader):
     return method, path, headers, body
 
 
+def _write_header(writer, status, content_type, length):
+    writer.write((
+        "HTTP/1.1 %s\r\n"
+        "Content-Type: %s\r\n"
+        "Content-Length: %d\r\n"
+        "Connection: close\r\n"
+        "\r\n" % (status, content_type, length)
+    ).encode("utf-8"))
+
+
 async def send_response(writer, status, content_type, body):
     """Send HTTP response"""
     if isinstance(body, str):
         body = body.encode("utf-8")
-
-    response = f"HTTP/1.1 {status}\r\n"
-    response += f"Content-Type: {content_type}\r\n"
-    response += f"Content-Length: {len(body)}\r\n"
-    response += "Connection: close\r\n"
-    response += "\r\n"
-
-    writer.write(response.encode("utf-8"))
-    writer.write(body)
+    _write_header(writer, status, content_type, len(body))
+    # Write in slices: when the socket takes only part of a write(), asyncio
+    # copies the unsent rest in one piece, which can fail on a fragmented
+    # heap for big bodies.
+    mv = memoryview(body)
+    for i in range(0, len(body), _CHUNK_SIZE):
+        writer.write(mv[i:i + _CHUNK_SIZE])
+        await writer.drain()
     await writer.drain()
 
 
