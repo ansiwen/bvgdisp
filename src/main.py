@@ -4,7 +4,7 @@ import machine
 import network
 import asyncio
 import aiohttp
-from hub75 import Hub75
+import hub75
 from picographics import PicoGraphics, DISPLAY_GENERIC, PEN_RGB888
 from font_bvg import font_small
 import settings
@@ -19,7 +19,10 @@ _COL_GAP = const(3)
 _TEXT_BUF_SZ = const(384)
 _WARN_BUF_SZ = const(2560)
 
-_FRAME_RATE = const(25)
+_FRAME_RATE = const(30)
+# S-PWM panels: refresh at _SPWM_SYNC * _FRAME_RATE, each frame is shown for
+# exactly _SPWM_SYNC refreshes
+_SPWM_SYNC = const(2)
 _DEST_SCROLL_DELAY = const(5)
 _BLINK_DELAY_MS = const(600)
 _FETCH_DELAY = const(10)
@@ -80,7 +83,17 @@ _row_y0 = 1 if _disp_height == 64 else 0
 _row_height = 9 if _disp_height == 64 else 8
 _n_textlines = (_disp_height - _row_y0) // _row_height
 
-_h75 = Hub75(_disp_width, _disp_height, color_order=hw_conf.COLOR_ORDER)
+# hw_conf.PANEL selects a panel with S-PWM driver chips, eg. hub75.PANEL_SM16380SH,
+# and the optional hw_conf.SPWM_PROFILE its registers, eg. hub75.SM16380SH_REG8
+_spwm = hasattr(hw_conf, "PANEL")
+if _spwm:
+    _h75 = hub75.Hub75SPWM(_disp_width, _disp_height, panel_type=hw_conf.PANEL,
+                           color_order=hw_conf.COLOR_ORDER)
+    _h75.set_refresh_rate(_SPWM_SYNC * _FRAME_RATE)
+    if hasattr(hw_conf, "SPWM_PROFILE"):
+        _h75.set_config_registers(hw_conf.SPWM_PROFILE)
+else:
+    _h75 = hub75.Hub75(_disp_width, _disp_height, color_order=hw_conf.COLOR_ORDER)
 _h75.start()
 
 # State shared between the tasks and the display thread. The warning
@@ -471,6 +484,7 @@ def display_thread():
     try:
         # local copies of global vars to avoid lookup
         h75 = _h75
+        spwm = _spwm
         disp = _disp
         disp_mv = _disp_mv
         disp_width = _disp_width
@@ -566,12 +580,17 @@ def display_thread():
                 blink_hide = not blink_hide
             # elapsed = time.ticks_diff(time.ticks_ms(), t1)
             # print("elapsed", elapsed)
-            # busy loop on core 2 to avoid flickering
             t1 = ticks_add(t1, _FRAME_DELAY_MS)
-            while True:
-                if ticks_diff(ticks_ms(), t1) >= 0:
-                    break
-            h75.update(disp)
+            if spwm:
+                # waits for the panel refresh, so every frame is shown for
+                # exactly _FRAME_DELAY_MS, and t1 keeps up with it
+                h75.update(disp, _SPWM_SYNC)
+            else:
+                # busy loop on core 2 to avoid flickering
+                while True:
+                    if ticks_diff(ticks_ms(), t1) >= 0:
+                        break
+                h75.update(disp)
     except Exception as e:
         print(f"display thread failed: {e}")
         _disp_thread_crash = crashlog.format_exception("display_thread", e)
@@ -994,10 +1013,11 @@ except Exception as e:
     raise
 finally:
     print("shutting down")
-    _h75.stop()
+    # stop the display thread first, it might be waiting in _h75.update()
     _disp_thread_stop = True
     _disp_thread_lock.acquire()
     _disp_thread_lock.release()
+    _h75.stop()
     write_disp_thread_crash()
     # only on a crash, not on Ctrl-C, so the REPL stays usable
     if _crashed and _RESET_ON_CRASH:
