@@ -4,6 +4,7 @@ import hashlib
 import os
 import time
 import settings
+import assets
 
 # Session management
 _sessions = {}  # token -> last_activity_time
@@ -192,6 +193,11 @@ async def send_response(writer, status, content_type, body):
 
 async def send_file(writer, path, content_type):
     """Send a file from flash, so it never has to fit in RAM as a whole"""
+    data = assets.get(path)
+    if data is not None:
+        # built into the firmware, also in flash
+        await send_response(writer, "200 OK", content_type, data)
+        return
     try:
         size = os.stat(path)[6]
     except OSError:
