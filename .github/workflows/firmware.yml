@@ -10,7 +10,7 @@ jobs:
     permissions:
       contents: write   # to attach the uf2 to a release on tags
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # for the version in the REPL banner
 
@@ -18,7 +18,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi
 
       # The pinned dependencies only change with firmware/build.sh
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: firmware/.deps
           key: deps-${{ hashFiles('firmware/build.sh') }}
@@ -26,7 +26,7 @@ jobs:
       - name: Build
         run: firmware/build.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bvgdisp-i75w_rp2350
           path: firmware/dist/*.uf2
