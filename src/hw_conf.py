@@ -12,4 +12,6 @@ COLOR_ORDER = hub75.COLOR_ORDER_RGB
 # COLOR_ORDER = hub75.COLOR_ORDER_RBG
 
 PANEL = hub75.PANEL_SM16380SH
-SPWM_PROFILE = hub75.SM16380SH_REG8   # optional, without it SM16380SH_REG2
+# Optional, the default is SM16380SH_REG2. REG8 is brighter, but can show
+# noise in large bright areas.
+# SPWM_PROFILE = hub75.SM16380SH_REG8
