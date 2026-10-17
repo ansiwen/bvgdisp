@@ -6,6 +6,8 @@ SETTINGS_FILE = "/settings.json"
 DEFAULT_SETTINGS = {
     "WIFI_SSID": "",
     "WIFI_PASSWORD": "",
+    # README and the web UI's fallback (assets/index.html) name
+    # https://v6.bvg.transport.rest instead
     "API_URL": "http://vbb.a6n.de",
     "FILTERED": [],
     "WALK_DELAY": 0,

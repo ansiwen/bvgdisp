@@ -59,7 +59,7 @@ This project requires **Pimoroni MicroPython** (not standard MicroPython) as it 
 
 `firmware/build.sh` builds a MicroPython firmware with bvgdisp and the files in `src/assets/` (`index.html` and the PNGs) built in, so no files are needed on the device. The GitHub Actions workflow builds it on every push: download `bvgdisp-i75w_rp2350.uf2` from the run's artifacts, or from a release for tags. The firmware includes `Hub75SPWM` for panels with S-PWM driver chips such as the SM16380SH, from [ansiwen/pimoroni-pico](https://github.com/ansiwen/pimoroni-pico/tree/hub75-spwm).
 
-- The built-in `hw_conf.py` is for a 128x64 panel with `COLOR_ORDER_RBG`. For other panels, put your own `hw_conf.py` on the device: files on the device take precedence over the built-in ones, so the same goes for the other modules and the files in `assets/`, eg. `assets/index.html`.
+- The built-in `hw_conf.py` is for a 128x64 panel with SM16380SH S-PWM driver chips and `COLOR_ORDER_RGB`. For other panels, put your own `hw_conf.py` on the device: files on the device take precedence over the built-in ones, so the same goes for the other modules and the files in `assets/`, eg. `assets/index.html`.
 - Settings are stored in `/settings.json` on the device as before, and are kept when you flash a new firmware.
 - Hold button A while powering on to get to the REPL instead of starting bvgdisp.
 - If the device has bvgdisp's files from an earlier installation, delete them, except `settings.json` and a `hw_conf.py` of your own, otherwise they are used instead of the built-in ones.
@@ -109,6 +109,13 @@ Available display options:
 - `DISPLAY_INTERSTATE75_128X64`
 - `DISPLAY_INTERSTATE75_192X64`
 - `DISPLAY_INTERSTATE75_256X64`
+
+Panels with S-PWM driver chips such as the SM16380SH need the firmware built by `firmware/build.sh`, and `PANEL` in `hw_conf.py`:
+
+```python
+PANEL = hub75.PANEL_SM16380SH
+# SPWM_PROFILE = hub75.SM16380SH_REG8   # optional, the default is SM16380SH_REG2
+```
 
 ### Initial Setup (Access Point Mode)
 
@@ -169,6 +176,9 @@ WiFi connection failed after multiple attempts. Check your SSID and password in 
 
 ### Colors appear wrong (red/blue swapped)
 Change `COLOR_ORDER` in `hw_conf.py` between `COLOR_ORDER_RGB` and `COLOR_ORDER_RBG`.
+
+### Noise or ghosting on an S-PWM panel
+The chip registers don't suit your panel. Try another `SPWM_PROFILE` in `hw_conf.py`, eg. `hub75.SM16380SH_REG2` (the default) or `hub75.SM16380SH_REG1` (darker). On a P2.5 128x64 SM16380SH panel, REG7, REG32 and REG34 showed ghosting, and REG8 can show noise in large bright areas.
 
 ### No departures shown
 - Check that your Station ID is correct

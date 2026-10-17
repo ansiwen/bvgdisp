@@ -595,6 +595,7 @@
 
                 document.getElementById('wifi-ssid').value = settings.WIFI_SSID || '';
                 document.getElementById('wifi-password').value = settings.WIFI_PASSWORD || '';
+                // Only used if API_URL is empty: the device's default is in settings.py
                 document.getElementById('api-url').value = settings.API_URL || 'https://v6.bvg.transport.rest';
                 document.getElementById('station-id').value = settings.STATION_ID || '900100003';
                 document.getElementById('selected-station-id').textContent = settings.STATION_ID || 'None';
@@ -638,6 +639,7 @@
 
         async function searchStations(query) {
             try {
+                // Always this API, not the configured API_URL
                 const response = await fetch(`https://v6.bvg.transport.rest/stops?query=${encodeURIComponent(query)}`);
                 const data = await response.json();
 

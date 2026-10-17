@@ -99,6 +99,9 @@ _h75.start()
 
 # State shared between the tasks and the display thread. The warning
 # ticker's state is set up after banner(), see the end of this file.
+# Every global must exist before the display thread starts: there is no GIL
+# on rp2, and adding a global while core 1 looks one up can make that lookup
+# fail with a NameError.
 _dimming = 10  # 0-10, set by check_night_time_task
 _dest_offset = 0  # x of the DEST column, set by render_task
 _textlines = []  # text row buffers, allocated by render_task

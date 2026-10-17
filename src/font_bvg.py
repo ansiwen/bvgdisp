@@ -1,3 +1,12 @@
+"""The 8px bitmap font used by render_text() in bvgdisp.py.
+
+Each glyph is [n, row0, ..., row7]. A row is n bits wide, with the most
+significant bit as the leftmost column. Bit 0 is not drawn: it is the gap to
+the next character, so the glyph is n-1 pixels wide and advances the cursor by
+n (by n-1 with kerning, unless the glyphs would touch). Bold glyphs use the
+key "*" + char, and fall back to the regular glyph. A character without a
+glyph is skipped, and prints "missing character:".
+"""
 font_small = {
     "fontheight": 8,
     " ": [
