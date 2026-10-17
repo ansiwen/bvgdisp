@@ -1,4 +1,4 @@
-"""Data files the app needs (index.html, PNGs).
+"""The files in assets/ (index.html, PNGs), by their path, eg. "assets/index.html".
 
 A file on the filesystem always wins, so it can be replaced on the device.
 Otherwise the copy built into the firmware is used (see firmware/), which

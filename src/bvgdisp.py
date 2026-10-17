@@ -254,18 +254,18 @@ def parse_http_date(date_str):
 def banner():
     import pngdec
     import random
-    import assets
+    import assetfiles
     disp, disp_mv = _disp, _disp_mv
     pos_y = _disp_height // 2 - 16
     img = PicoGraphics(width=128, height=64, display=DISPLAY_GENERIC, pen_type=PEN_RGB888)
     img_mv = memoryview(img)
     png = pngdec.PNG(img)
-    assets.open_png(png, "ansiwen128x64.png")
+    assetfiles.open_png(png, "assets/ansiwen128x64.png")
     png.decode(0, 0)
     bvg = PicoGraphics(display=hw_conf.DISPLAY)
     bvg_mv = memoryview(bvg)
     png2 = pngdec.PNG(bvg)
-    assets.open_png(png2, "bvgdisp_logo.png")
+    assetfiles.open_png(png2, "assets/bvgdisp_logo.png")
     png2.decode(19, pos_y)
     l = _disp_width*4
     h75 = _h75

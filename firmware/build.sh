@@ -38,8 +38,7 @@ fetch "$PIMORONI_PICO" "$DEPS/pimoroni-pico"
 git -C "$DEPS/pimoroni-pico" submodule update -q --init --depth 1
 
 mkdir -p "$BUILD" "$HERE/dist"
-python3 "$HERE/mkassets.py" "$BUILD/frozen_assets.py" \
-    "$SRC/index.html" "$SRC/ansiwen128x64.png" "$SRC/bvgdisp_logo.png"
+python3 "$HERE/mkassets.py" "$BUILD/frozen_assets.py" "$SRC" assets
 make -C "$DEPS/micropython/mpy-cross" -j "$JOBS" >/dev/null
 
 BOARD=$DEPS/interstate75/boards/i75w_rp2350

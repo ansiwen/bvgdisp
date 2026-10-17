@@ -57,9 +57,9 @@ This project requires **Pimoroni MicroPython** (not standard MicroPython) as it 
 
 ### Firmware with bvgdisp built in (Interstate 75 W with RP2350)
 
-`firmware/build.sh` builds a MicroPython firmware with bvgdisp, `index.html` and the PNGs built in, so no files are needed on the device. The GitHub Actions workflow builds it on every push: download `bvgdisp-i75w_rp2350.uf2` from the run's artifacts, or from a release for tags. The firmware includes `Hub75SPWM` for panels with S-PWM driver chips such as the SM16380SH, from [ansiwen/pimoroni-pico](https://github.com/ansiwen/pimoroni-pico/tree/hub75-spwm).
+`firmware/build.sh` builds a MicroPython firmware with bvgdisp and the files in `src/assets/` (`index.html` and the PNGs) built in, so no files are needed on the device. The GitHub Actions workflow builds it on every push: download `bvgdisp-i75w_rp2350.uf2` from the run's artifacts, or from a release for tags. The firmware includes `Hub75SPWM` for panels with S-PWM driver chips such as the SM16380SH, from [ansiwen/pimoroni-pico](https://github.com/ansiwen/pimoroni-pico/tree/hub75-spwm).
 
-- The built-in `hw_conf.py` is for a 128x64 panel with `COLOR_ORDER_RBG`. For other panels, put your own `hw_conf.py` on the device: files on the device take precedence over the built-in ones, so the same goes for `index.html`, the PNGs and the other modules.
+- The built-in `hw_conf.py` is for a 128x64 panel with `COLOR_ORDER_RBG`. For other panels, put your own `hw_conf.py` on the device: files on the device take precedence over the built-in ones, so the same goes for the other modules and the files in `assets/`, eg. `assets/index.html`.
 - Settings are stored in `/settings.json` on the device as before, and are kept when you flash a new firmware.
 - Hold button A while powering on to get to the REPL instead of starting bvgdisp.
 - If the device has bvgdisp's files from an earlier installation, delete them, except `settings.json` and a `hw_conf.py` of your own, otherwise they are used instead of the built-in ones.
