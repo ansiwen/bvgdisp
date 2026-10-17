@@ -61,4 +61,4 @@ Boot and network: without an SSID, or when connecting fails, the device starts a
 - Only core 0 writes to flash. Flash writes stall the other core.
 - Send responses through `send_response()`/`send_file()`: one big `writer.write()` makes asyncio copy the unsent rest in one piece, which fails on a fragmented heap.
 - `src/main.py.bak_*` files are local backups and untracked. Don't edit or commit them.
-- Debug output goes to `print`, over the USB serial REPL. `console()` also writes to the LED panel during boot.
+- Debug output goes to `print`, over the USB serial REPL. `console()` also writes to the LED panel during boot. **Put info and debug prints under `if __debug__:`**; only warnings, errors and the boot messages before the tasks' loops (WiFi, IP address, web server, task starts) print unconditionally. `_DEBUG` in `firmware/manifest.py` is the switch: when it's `False`, the app is frozen with mpy-cross `-O1`, which compiles `__debug__` as `False` and leaves those blocks out of the firmware entirely, strings included.

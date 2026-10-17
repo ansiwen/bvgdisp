@@ -59,7 +59,8 @@ def _save():
     # littlefs renames atomically, so a power loss during the write can't
     # leave a truncated settings file (which would load as all defaults)
     os.rename(tmp, SETTINGS_FILE)
-    print(f"Settings saved to {SETTINGS_FILE}")
+    if __debug__:
+        print(f"Settings saved to {SETTINGS_FILE}")
 
 
 @micropython.native

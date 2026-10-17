@@ -610,7 +610,8 @@ def render_warn_msg():
         clear_cols(warn_buf, _WARN_BUF_SZ // 8, 0, _WARN_BUF_SZ)
         render_text(msg, warn_buf, 0, kerning=True, clip=_WARN_BUF_SZ)
         _warn_msg_sz = min(msg_size, _WARN_BUF_SZ)
-    print("updated warn message")
+    if __debug__:
+        print("updated warn message")
 
 _separator = " - "
 _separator_sz = render_text(_separator, kerning=True)
@@ -782,7 +783,8 @@ def display_thread():
         _disp_thread_crash = crashlog.format_exception("display_thread", e)
         print(_disp_thread_crash)
     finally:
-        print("display thread finished")
+        if __debug__:
+            print("display thread finished")
         _disp_thread_lock.release()
 
 def write_disp_thread_crash():
@@ -823,7 +825,8 @@ def render_row(i, eta, line, line_size, typ, dest, bg_col, line_width, force, co
                 render_text(eta_s, tl_buf, _ETA_WIDTH - eta_size + 1, clip=_ETA_WIDTH)
             states[_S_ETA] = eta
             states[_S_BLINKING] = not eta
-            print("updated ETA of line", i)
+            if __debug__:
+                print("updated ETA of line", i)
 
     # then render LINE
     if line != states[_S_LINE] or force:
@@ -840,7 +843,8 @@ def render_row(i, eta, line, line_size, typ, dest, bg_col, line_width, force, co
             states[_S_LINE] = line
             states[_S_LINE_SZ] = line_size
             states[_S_LINE_PEN] = make_pen(color)
-            print("updated LINE of line", i)
+            if __debug__:
+                print("updated LINE of line", i)
 
     # last is DEST, because it has flexible length
     if dest != states[_S_DEST] or force:
@@ -852,7 +856,8 @@ def render_row(i, eta, line, line_size, typ, dest, bg_col, line_width, force, co
             # new dest size with the old scroll offset; render_task
             # resets all updated rows again to scroll in sync
             states[_S_DEST_X] = _DEST_SCROLL_INIT
-            print("updated DEST of line", i)
+            if __debug__:
+                print("updated DEST of line", i)
         return True
     return False
 
@@ -990,11 +995,13 @@ def set_clock(date):
     _rtc.datetime(date)
     if not _time_set:
         _time_set = True
-        print("time set")
+        if __debug__:
+            print("time set")
         return True
-    diff = time.time() - old_t
-    if diff < -1 or diff > 1:
-        print("time diff:", diff)
+    if __debug__:
+        diff = time.time() - old_t
+        if diff < -1 or diff > 1:
+            print("time diff:", diff)
     return False
 
 def parse_departures(deps, filtered):
@@ -1159,8 +1166,9 @@ async def data_fetch_task():
         parse_start_ms = time.ticks_ms()
         # parses in place; the result holds copies, not slices of _recv_buf
         data = json.loads(memoryview(_recv_buf)[hdr_end + 4:n])
-        print("parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms),
-              "ms,", n - hdr_end - 4, "bytes")
+        if __debug__:
+            print("parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms),
+                  "ms,", n - hdr_end - 4, "bytes")
 
         _dep_data = parse_departures(data["departures"], settings.get("FILTERED"))
         # only some APIs send warnings, eg. v6.bvg.transport.rest doesn't
@@ -1168,7 +1176,8 @@ async def data_fetch_task():
         # compare by text, not id: the id can change while the
         # text stays the same (duplicate warnings), or vice versa
         set_warn_msg(warn_msg)
-        print("updated data")
+        if __debug__:
+            print("updated data")
         return False
 
     request = None
@@ -1193,7 +1202,8 @@ async def data_fetch_task():
         except Exception as e:
             crashlog.print_error("Fetch task failed", e)
 
-        print("memfree:", gc.mem_free())
+        if __debug__:
+            print("memfree:", gc.mem_free())
         await asyncio.sleep(_FETCH_DELAY)
 
 
@@ -1203,7 +1213,8 @@ async def check_night_time_task():
     while not _time_set:
         await asyncio.sleep(1)
     while True:
-        print("check_night_time")
+        if __debug__:
+            print("check_night_time")
         now = _rtc.datetime()
         # bad settings (e.g. NIGHT_START "") must not end the task: an
         # exception escaping it stops the whole program
@@ -1232,7 +1243,8 @@ async def check_night_time_task():
                 dim = 10
 
             if _dimming != dim:
-                print("changing dimming")
+                if __debug__:
+                    print("changing dimming")
                 _dimming = dim
                 _pen_bvg = make_pen(_BVG)
         except Exception as e:

@@ -241,7 +241,8 @@ async def handle_client(reader, writer):
             await writer.wait_closed()
             return
 
-        print(f"Request: {method} {path}")
+        if __debug__:
+            print(f"Request: {method} {path}")
 
         # Route handling
         if path == "/" or path == "/index.html":
