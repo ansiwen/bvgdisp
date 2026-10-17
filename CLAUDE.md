@@ -7,11 +7,10 @@ BVG (Berlin transit) departure display: a Raspberry Pi Pico W / Pico 2 W (usuall
 - **Pimoroni MicroPython**, not CPython or stock MicroPython. It depends on the firmware-provided `hub75`, `picographics`, `pngdec`, plus `machine`, `network`, `_thread`, and `micropython` (`const`, `@micropython.native`, `@micropython.viper`). None of this runs on a desktop, and there are no tests.
 - `src/` is the device's filesystem root. The MicroPico VS Code extension syncs it (`micropico.syncFolder: "src"`), or you can copy it with `mpremote cp -r src :`. On boot, the device runs `main.py`.
 - `typings/` holds MicroPython/Pimoroni stubs, used only by Pylance. Don't edit them.
-- `src/lib/aiohttp/` is a vendored copy of micropython-lib's `aiohttp`, for the stock firmware. The device loads the `.mpy` files. The `.py` sources are untracked reference copies.
 - Settings persist in `/settings.json` on the device, not in the repo.
-- `firmware/build.sh` builds a firmware for the Interstate 75 W (RP2350) with the app, `src/assets/` and micropython-lib's `aiohttp` frozen in. CI runs it on every push. What's frozen is listed in `firmware/manifest.py`, so **a new module must be added there**; files in `src/assets/` are picked up automatically. With this firmware:
+- `firmware/build.sh` builds a firmware for the Interstate 75 W (RP2350) with the app and `src/assets/` frozen in. CI runs it on every push. What's frozen is listed in `firmware/manifest.py`, so **a new module must be added there**; files in `src/assets/` are picked up automatically. With this firmware:
   - The frozen `firmware/main.py` runs instead of a `main.py` on the device.
-  - Imports look in the device's root first, then in the frozen modules, then in `/lib` (`sys.path` is `['', '.frozen', '/lib']`), and a directory beats a `.py` file of the same name. So a stale file in the device's root silently replaces the frozen one, while the frozen `aiohttp` replaces `/lib/aiohttp`.
+  - Imports look in the device's root first, then in the frozen modules, then in `/lib` (`sys.path` is `['', '.frozen', '/lib']`), and a directory beats a `.py` file of the same name. So a stale file in the device's root silently replaces the frozen one, while a frozen module replaces one in `/lib`.
   - Assets are not files in the firmware: **open them through `assetfiles`**, which prefers the device's file too.
 
 ## Files

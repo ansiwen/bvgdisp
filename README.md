@@ -192,9 +192,6 @@ Included in Pimoroni MicroPython:
 - `picographics` - Graphics library
 - `pngdec` - PNG decoder for startup animation
 
-Bundled in `lib/`:
-- `aiohttp` - Async HTTP client for API requests
-
 ## License
 
 See [LICENSE](LICENSE) file.

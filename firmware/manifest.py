@@ -4,10 +4,6 @@
 # Everything the i75w_rp2350 board normally freezes
 include("$(BOARD_DIR)/manifest.py")
 
-# From micropython-lib, built for this firmware (src/lib/aiohttp is for the
-# stock firmware)
-require("aiohttp")
-
 # The app. A module with the same name on the device's filesystem is imported
 # instead, eg. hw_conf.py for a different panel.
 freeze("../src", (
