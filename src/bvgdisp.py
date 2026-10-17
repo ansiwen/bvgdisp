@@ -49,6 +49,7 @@ _S_DEST_SZ = const(3)
 _S_DEST_X = const(4)
 _S_BLINKING = const(5)
 _S_LINE_PEN = const(6)
+_S_LINE_SZ = const(7)  # the width of _S_LINE
 
 _FRAME_DELAY_MS = const(1000//_FRAME_RATE)
 _DEST_SCROLL_INIT = const(-_FRAME_RATE*_DEST_SCROLL_DELAY)
@@ -744,7 +745,7 @@ def asyncio_exception_handler(loop, context):
 
 # states of a textline that is blank. The ETA is kept in minutes, as an
 # int, so that its text is only built when it changes.
-_empty_states = [None, "", "", 0, 0, False, 0]
+_empty_states = [None, "", "", 0, 0, False, 0, 0]
 
 # render_row() and clear_row() are native: as bytecode, their frames are
 # too big for the C stack (over 11 words), so every call would allocate
@@ -781,6 +782,7 @@ def render_row(i, eta, line, line_size, typ, dest, bg_col, line_width, force, co
             clear_cols(tl_buf, _TEXT_BUF_SZ // 8, _ETA_WIDTH, line_width)
             render_text(line, tl_buf, _ETA_WIDTH + line_offset, bold=True, clip=_ETA_WIDTH+line_width, kerning=True)
             states[_S_LINE] = line
+            states[_S_LINE_SZ] = line_size
             states[_S_LINE_PEN] = make_pen(color)
             print("updated LINE of line", i)
 
@@ -858,7 +860,12 @@ async def render_task():
                 # 0 is "now"; below that only with a negative WALK_DELAY
                 eta_n = max(eta_n // 60, 0)
 
-                line_size = render_text(line, bold=True, kerning=True)
+                # measured only when the row's line name changes
+                states = _textlines[i][2]
+                if line == states[_S_LINE]:
+                    line_size = states[_S_LINE_SZ]
+                else:
+                    line_size = render_text(line, bold=True, kerning=True)
                 if render_row(i, eta_n, line, line_size, typ, dest,
                               bg_col, line_width, force_update, colored, sub_colors):
                     dest_redrawn |= 1 << i
