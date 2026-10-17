@@ -31,6 +31,7 @@ DEFAULT_SETTINGS = {
 
 _settings = None
 _updated = False
+_version = 0  # counts set() calls, see version()
 
 def _load():
     """Load settings from file, merging with defaults"""
@@ -78,7 +79,7 @@ def set(key_or_dict, value=None):
         set('WIFI_SSID', 'my_network')
         set({'WIFI_SSID': 'my_network', 'WIFI_PASSWORD': 'secret'})
     """
-    global _updated
+    global _updated, _version
     if _settings is None:
         _load()
 
@@ -92,6 +93,13 @@ def set(key_or_dict, value=None):
 
     _save()
     _updated = True
+    _version += 1
+
+def version():
+    """A number that changes with every set(), so that a caller can tell
+    whether its values derived from the settings are still current. Unlike
+    check(), it doesn't consume anything, so it works for several callers."""
+    return _version
 
 def check():
     global _updated

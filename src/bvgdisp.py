@@ -3,7 +3,7 @@ import socket
 import machine
 import network
 import asyncio
-import aiohttp
+import json
 import hub75
 import picographics
 import font_bvg
@@ -18,6 +18,9 @@ _COL_GAP = const(3)
 
 _TEXT_BUF_SZ = const(384)
 _WARN_BUF_SZ = const(2560)
+# a whole HTTP response, headers included. With the default 14 results,
+# v6.bvg.transport.rest sends about 19 KB, vbb.a6n.de about 2 KB.
+_RECV_BUF_SZ = const(32 * 1024)
 
 _FRAME_RATE = const(30)
 # S-PWM panels: refresh at _SPWM_SYNC * _FRAME_RATE, each frame is shown for
@@ -801,12 +804,10 @@ def clean_name(s):
     s = s.replace("  ", " ")
     return s.strip()
 
-def set_clock(response):
-    """Set the RTC from the response's Date header. Returns True on the
+def set_clock(date):
+    """Set the RTC from the value of a Date header. Returns True on the
     first call, when the clock wasn't set before."""
     global _time_set
-    # header names keep the server's case, e.g. "date" via a proxy
-    date = response._get_header("date", None)
     if not date:
         raise ValueError("response has no Date header")
     date = parse_http_date(date)
@@ -865,54 +866,151 @@ def pick_warning(warnings, now):
             print("skipping bad warning:", e)
     return warn_msg
 
+@micropython.viper
+def find_bytes(buf: ptr8, start: int, end: int, pat: ptr8, pat_len: int) -> int:
+    """Return the index of pat in buf[start:end], or -1. Upper case letters
+    in buf also match lower case ones in pat, so pat must be lower case."""
+    last = end - pat_len
+    i = start
+    while i <= last:
+        j = 0
+        while j < pat_len:
+            c = buf[i + j]
+            if c >= 65 and c <= 90:  # A-Z
+                c |= 32
+            if c != pat[j]:
+                break
+            j += 1
+        if j == pat_len:
+            return i
+        i += 1
+    return -1
+
+def make_request():
+    """Return the departures request for http_get(), from the settings:
+    (host, port, ssl, request head, request tail)"""
+    url = f'{settings.get("API_URL")}/stops/{settings.get("STATION_ID")}/departures'
+    # API_URL can have a port and a path, eg. "http://host:8080/vbb"
+    proto, _, host, path = url.split("/", 3)
+    if proto == "http:":
+        port, ssl = 80, None
+    elif proto == "https:":
+        port, ssl = 443, True
+    else:
+        raise ValueError("unsupported protocol: " + proto)
+    hostname = host
+    if ":" in host:
+        hostname, port = host.split(":", 1)
+        port = int(port)
+    # pretty=false: whitespace would take up room in _recv_buf
+    query = "results=14&duration=60&pretty=false&sparse=true&language=de"
+    for product in ("bus", "tram", "subway", "regional", "suburban", "ferry", "express"):
+        if not settings.get("SHOW_" + product.upper()):
+            query += "&" + product + "=false"
+    # HTTP/1.0, so the server can't send a chunked body
+    return (hostname, port, ssl, f"GET /{path}?{query}".encode(),
+            f" HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: compat\r\n\r\n".encode())
+
+async def http_get(request, when):
+    """Send a request from make_request(), with &when=<when> unless when
+    is None, and read the whole response into _recv_buf. Returns its
+    length. There is no timeout: wrap it in asyncio.wait_for()."""
+    host, port, ssl, head, tail = request
+    mv = memoryview(_recv_buf)
+    n = 0
+    stream, _ = await asyncio.open_connection(host, port, ssl=ssl)
+    try:
+        stream.write(head)
+        if when is not None:
+            stream.write(b"&when=%d" % when)
+        stream.write(tail)
+        await stream.drain()
+        while True:
+            if n == _RECV_BUF_SZ:
+                raise ValueError("response larger than %d bytes" % _RECV_BUF_SZ)
+            # Stream.read() would copy the growing response for every
+            # TCP segment, and need up to twice its size in one piece
+            r = await stream.readinto(mv[n:])
+            if r is None:
+                continue  # eg. only part of a TLS record arrived
+            if not r:
+                return n
+            n += r
+    finally:
+        # also on a timeout: wait_for() cancels us
+        await stream.wait_closed()  # closes the socket
+
+def http_status(hdr_end):
+    """Return the status code of the response in _recv_buf"""
+    buf = _recv_buf
+    i = find_bytes(buf, 0, hdr_end, b" ", 1) + 1  # after "HTTP/1.1 "
+    if i == 0 or i + 3 > hdr_end:
+        raise ValueError("bad status line")
+    return (buf[i] - 48) * 100 + (buf[i + 1] - 48) * 10 + buf[i + 2] - 48
+
+def http_header(name, hdr_end):
+    """Return the value of a header of the response in _recv_buf as str, or
+    None. name is lower case, with the CRLF before it and the colon, eg.
+    b"\\r\\ndate:": the case of header names differs, eg. behind a proxy."""
+    buf = _recv_buf
+    i = find_bytes(buf, 0, hdr_end, name, len(name))
+    if i < 0:
+        return None
+    i += len(name)
+    while buf[i] == 32:  # " "
+        i += 1
+    # the CRLF at hdr_end ends the last header
+    end = find_bytes(buf, i, hdr_end + 2, b"\r\n", 2)
+    return str(memoryview(buf)[i:end], "ascii")
+
 async def data_fetch_task():
     """Fetches data every 10 seconds"""
     print("fetch task started")
 
-    async def fetch(params):
+    async def fetch(request, when):
         """One request. Returns True if the next one should follow right away."""
         global _dep_data
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f'{settings.get("API_URL")}/stops/{settings.get("STATION_ID")}/departures',
-                params=params,
-            ) as response:
-                if response.status != 200:
-                    print("fetch failed:", response.status)
-                    return False
-                if set_clock(response):
-                    return True
+        n = await http_get(request, when)
+        hdr_end = find_bytes(_recv_buf, 0, n, b"\r\n\r\n", 4)
+        if hdr_end < 0:
+            raise ValueError("incomplete response headers")
+        status = http_status(hdr_end)
+        if status != 200:
+            print("fetch failed:", status)
+            return False
+        if set_clock(http_header(b"\r\ndate:", hdr_end)):
+            return True
 
-                parse_start_ms = time.ticks_ms()
-                data = await response.json()
-                print("parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms))
+        parse_start_ms = time.ticks_ms()
+        # parses in place; the result holds copies, not slices of _recv_buf
+        data = json.loads(memoryview(_recv_buf)[hdr_end + 4:n])
+        print("parsing:", time.ticks_diff(time.ticks_ms(), parse_start_ms),
+              "ms,", n - hdr_end - 4, "bytes")
 
-                _dep_data = parse_departures(data["departures"], settings.get("FILTERED"))
-                warn_msg = pick_warning(data["warnings"], time.time())
-                # compare by text, not id: the id can change while the
-                # text stays the same (duplicate warnings), or vice versa
-                set_warn_msg(warn_msg)
-                print("updated data")
+        _dep_data = parse_departures(data["departures"], settings.get("FILTERED"))
+        warn_msg = pick_warning(data["warnings"], time.time())
+        # compare by text, not id: the id can change while the
+        # text stays the same (duplicate warnings), or vice versa
+        set_warn_msg(warn_msg)
+        print("updated data")
         return False
 
+    request = None
+    request_version = -1  # the settings.version() request was made for
     while True:
         try:
             await _safe_to_fetch.wait()
             gc.collect()
-            params = {
-                "results": "14",
-                "duration": "60",
-                "pretty": "false",  # whitespace costs RAM: the body is held whole
-                "sparse": "true",
-                "language": "de",
-            }
-            for product in ("bus", "tram", "subway", "regional", "suburban", "ferry", "express"):
-                if not settings.get("SHOW_" + product.upper()):
-                    params[product] = "false"
-            if _time_set: params["when"] = str(time.time() + int(settings.get("WALK_DELAY")))
-            # aiohttp has no timeouts: without this, a server or link that stops
-            # responding mid-request would hang the fetch task forever
-            if await asyncio.wait_for(fetch(params), _FETCH_TIMEOUT):
+            # built only when the settings change, not for every fetch
+            if request_version != settings.version():
+                request = make_request()
+                request_version = settings.version()
+            when = None
+            if _time_set:
+                when = time.time() + int(settings.get("WALK_DELAY"))
+            # http_get() has no timeout: without this, a server or link that
+            # stops responding mid-request would hang the fetch task forever
+            if await asyncio.wait_for(fetch(request, when), _FETCH_TIMEOUT):
                 continue
         except asyncio.TimeoutError:
             print("fetch timed out")
@@ -1008,6 +1106,9 @@ _warn_buf = make_textbuf(_WARN_BUF_SZ)
 _warn_buf_lock = _thread.allocate_lock()
 _warn_msg = ""
 _warn_msg_sz = 0
+# the HTTP response of a fetch, allocated once while the heap is still
+# unfragmented, see http_get()
+_recv_buf = bytearray(_RECV_BUF_SZ)
 
 # Start the event loop
 _crashed = False

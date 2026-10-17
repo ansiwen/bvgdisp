@@ -53,7 +53,7 @@ Boot and network: without an SSID, or when connecting fails, the device starts a
 - Code is tuned for speed on the MCU. Module constants use `const()` with a leading underscore, which makes them compile-time and keeps them out of the module dict. Hot functions copy globals into locals and use `@micropython.native`/`viper`. Keep these patterns when you edit hot paths, and avoid allocating inside `display_thread`.
 - `blit()` has no bounds checks, so callers are responsible for offsets and lengths; see its docstring.
 - `time.ticks_ms()` wraps at 2³⁰ ms (about 12.4 days) on rp2. Never compare or add ticks with `>`/`+`. Always use `time.ticks_diff()`/`time.ticks_add()`.
-- The vendored aiohttp has **no timeouts**, so wrap every request in `asyncio.wait_for()`. It keeps response header names in the server's case, so look them up case-insensitively (`response._get_header()`).
+- HTTP requests go through `http_get()`, a minimal HTTP/1.0 client. It has **no timeout**, so wrap every call in `asyncio.wait_for()`. It reads the whole response into `_recv_buf`, allocated once at startup, so a response larger than `_RECV_BUF_SZ` fails the fetch. Nothing parsed from it may keep a reference into the buffer, because the next fetch overwrites it.
 - An exception that escapes any task in `main()` ends the whole program. Each task loop must catch its own errors, and data from the API should be handled one entry at a time.
 - Settings values aren't validated: the web UI can store `null` (JS `NaN`) or the wrong type. If `settings.json` can't be parsed, everything silently falls back to defaults, which loses WiFi and resets the password, so keep its writes atomic.
 - Only core 0 writes to flash. Flash writes stall the other core.
