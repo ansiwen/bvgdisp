@@ -1,4 +1,5 @@
 import asyncio
+import binascii
 import json
 import hashlib
 import os
@@ -11,21 +12,32 @@ _sessions = {}  # token -> last_activity_time
 _nonces = {}  # nonce -> expiry_time
 SESSION_TIMEOUT = 600  # 10 minutes in seconds
 NONCE_TIMEOUT = 60  # 1 minute for nonce validity
+# Both tables are bounded: otherwise anyone on the network could fill the
+# heap within a minute with challenge requests, and crash the device
+_MAX_SESSIONS = const(4)
+_MAX_NONCES = const(8)
 MAX_BODY_SIZE = 4096  # settings JSON is well below 1 KB
 _CHUNK_SIZE = const(1024)  # bytes per write() when sending responses
 
 
 def _generate_hex(length=16):
     """Generate random hex string"""
-    return "".join("%02x" % b for b in os.urandom(length))
+    return binascii.hexlify(os.urandom(length)).decode()
 
 
 def _sha256_hex(data):
     """Compute SHA256 and return hex string"""
     if isinstance(data, str):
         data = data.encode("utf-8")
-    digest = hashlib.sha256(data).digest()
-    return "".join("%02x" % b for b in digest)
+    return binascii.hexlify(hashlib.sha256(data).digest()).decode()
+
+
+def _add_bounded(table, key, value, max_len):
+    """table[key] = value, first removing the entries with the lowest values
+    (the oldest) to keep at most max_len"""
+    while len(table) >= max_len:
+        del table[min(table, key=table.get)]
+    table[key] = value
 
 
 def _cleanup_expired():
@@ -44,7 +56,7 @@ def create_challenge():
     _cleanup_expired()
     nonce = _generate_hex(16)
     salt = settings.get("PASSWORD_SALT")
-    _nonces[nonce] = time.time() + NONCE_TIMEOUT
+    _add_bounded(_nonces, nonce, time.time() + NONCE_TIMEOUT, _MAX_NONCES)
     return nonce, salt
 
 
@@ -70,7 +82,7 @@ def verify_login(nonce, response):
 
     # Create session
     token = _generate_hex(24)
-    _sessions[token] = time.time()
+    _add_bounded(_sessions, token, time.time(), _MAX_SESSIONS)
     return token
 
 
