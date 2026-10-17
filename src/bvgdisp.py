@@ -119,10 +119,14 @@ _disp_thread_crash = None  # backtrace text, written to flash by core 0
 @micropython.native
 def set_pen(disp, color):
     """Set pen with dimming applied. Color is (R, G, B) tuple."""
+    # unpacked by hand: tuple(<generator>) and create_pen(*color) allocate
+    r, g, b = color
     dimming = _dimming
     if dimming != 10:
-        color = tuple(v * dimming // 10 for v in color)
-    disp.set_pen(disp.create_pen(*color))
+        r = r * dimming // 10
+        g = g * dimming // 10
+        b = b * dimming // 10
+    disp.set_pen(disp.create_pen(r, g, b))
 
 _console_y = 0
 
@@ -339,6 +343,11 @@ def typ2col(t, l, subcol):
         return _WHITE
     return color
 
+# the bold glyphs by their character, so that render_text() doesn't have
+# to build "*" + char for every character
+_font_bold = {k[1:]: v for k, v in font_bvg.font_small.items()
+              if len(k) == 2 and k[0] == "*"}
+
 @micropython.native
 def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
     if not s:
@@ -350,13 +359,14 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
             clip = 0xffff
     cursor_x = x
     font = font_bvg.font_small
+    font_bold = _font_bold
     height = font["fontheight"]
     last_col = 0
     for char in s:
         if cursor_x >= clip:
             # invisible
             break
-        glyph = (bold and font.get("*" + char)) or font.get(char)
+        glyph = (bold and font_bold.get(char)) or font.get(char)
         if glyph is None:
             print("missing character:", char)
             continue
@@ -625,11 +635,15 @@ def asyncio_exception_handler(loop, context):
 # states of a textline that is blank
 _empty_states = ["", "", "", 0, 0, False]
 
-def render_row(i, eta_s, blinking, line, typ, dest, bg_col, line_width, force, colored, sub_colors):
+# the ETA texts, so that render_task doesn't build them every second
+_ETA_STRS_N = const(100)
+_eta_strs = tuple(str(n) + "'" for n in range(_ETA_STRS_N))
+
+def render_row(i, eta_s, blinking, line, line_size, typ, dest, bg_col, line_width, force, colored, sub_colors):
     """Redraw the changed columns of text row i, each under its own lock.
-    Returns (width of the line name, whether DEST was redrawn)."""
+    line_size is the width of the line name. Returns whether DEST was
+    redrawn."""
     tl_buf, _, locks, states = _textlines[i]
-    line_size = render_text(line, bold=True, kerning=True)
 
     # render ETA at beginning of textline buffer
     if eta_s != states[_S_ETA] or force:
@@ -673,8 +687,8 @@ def render_row(i, eta_s, blinking, line, typ, dest, bg_col, line_width, force, c
             # resets all updated rows again to scroll in sync
             states[_S_DEST_X] = _DEST_SCROLL_INIT
             print(f"updated DEST of line {i}")
-        return line_size, True
-    return line_size, False
+        return True
+    return False
 
 def clear_row(i):
     """Blank text row i, unless it is blank already."""
@@ -735,7 +749,7 @@ async def render_task():
                 force_update = True
             line_width = line_size_max
             i = 0
-            reset_dest_x = []
+            dest_redrawn = 0  # bit i: the DEST of row i was redrawn
             for line, typ, dest, when, bg_col in data:
                 if i >= _n_textlines:
                     break
@@ -750,23 +764,26 @@ async def render_task():
                 if eta_n < 1:
                     eta_s = ""
                     blinking = True
+                elif eta_n < _ETA_STRS_N:
+                    eta_s = _eta_strs[eta_n]
                 else:
                     eta_s = str(eta_n) + "'"
 
-                line_size, dest_updated = render_row(
-                    i, eta_s, blinking, line, typ, dest, bg_col,
-                    line_width, force_update, colored, sub_colors)
+                line_size = render_text(line, bold=True, kerning=True)
+                if render_row(i, eta_s, blinking, line, line_size, typ, dest,
+                              bg_col, line_width, force_update, colored, sub_colors):
+                    dest_redrawn |= 1 << i
                 line_size_max = max(line_size_max, line_size)
-                if dest_updated:
-                    reset_dest_x.append(i)
                 i += 1
 
             # restart the scrolling of all updated rows together
-            for j in reset_dest_x:
-                _textlines[j][2][_S_DEST].acquire()
-                _textlines[j][3][_S_DEST_X] = _DEST_SCROLL_INIT
-            for j in reset_dest_x:
-                _textlines[j][2][_S_DEST].release()
+            for j in range(i):
+                if dest_redrawn & (1 << j):
+                    _textlines[j][2][_S_DEST].acquire()
+                    _textlines[j][3][_S_DEST_X] = _DEST_SCROLL_INIT
+            for j in range(i):
+                if dest_redrawn & (1 << j):
+                    _textlines[j][2][_S_DEST].release()
 
             for j in range(i, _n_textlines):
                 clear_row(j)
