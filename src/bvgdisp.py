@@ -16,6 +16,7 @@ import crashlog
 _ETA_WIDTH = const(11)
 _COL_GAP = const(3)
 
+# widths in pixels of the 1-bit text buffers, multiples of 32, see blit()
 _TEXT_BUF_SZ = const(384)
 _WARN_BUF_SZ = const(2560)
 # a whole HTTP response, headers included. With the default 14 results,
@@ -39,7 +40,6 @@ _RED = const((120, 0, 0))
 _YELLOW = const((255, 180, 0))
 _BVG = const((255, 170, 0))
 _WHITE = const((255, 255, 255))
-_BG = const(0)
 
 _S_ETA = const(0)
 _S_LINE = const(1)
@@ -47,6 +47,7 @@ _S_DEST = const(2)
 _S_DEST_SZ = const(3)
 _S_DEST_X = const(4)
 _S_BLINKING = const(5)
+_S_LINE_PEN = const(6)
 
 _FRAME_DELAY_MS = const(1000//_FRAME_RATE)
 _DEST_SCROLL_INIT = const(-_FRAME_RATE*_DEST_SCROLL_DELAY)
@@ -71,11 +72,11 @@ _wlan = network.WLAN(network.STA_IF)
 # Setup for the display
 
 def make_textbuf(sz):
-    buf = picographics.PicoGraphics(width=sz, height=8, display=picographics.DISPLAY_GENERIC,
-                                    pen_type=picographics.PEN_RGB888)
-    buf.set_pen(0)
-    buf.clear()
-    return (buf, memoryview(buf))
+    """A text buffer of sz pixels by 8 lines, 1 bit per pixel: line after
+    line, sz // 8 bytes each, the leftmost pixel in bit 0 of the first
+    byte. Without color: blit() draws it in a pen. The 4 bytes at the end
+    are padding, see blit()."""
+    return bytearray(sz + 4)
 
 _disp = picographics.PicoGraphics(display=hw_conf.DISPLAY)
 _disp_mv = memoryview(_disp)
@@ -107,7 +108,7 @@ _h75.start()
 # fail with a NameError.
 _dimming = 10  # 0-10, set by check_night_time_task
 _dest_offset = 0  # x of the DEST column, set by render_task
-_textlines = []  # text row buffers, allocated by render_task
+_textlines = []  # text row buffers, allocated after banner()
 _dep_data = None  # departures, published by data_fetch_task
 _time_set = False  # RTC was set from a response's Date header
 _safe_to_fetch = asyncio.Event()  # render_task finished a cycle
@@ -117,16 +118,24 @@ _disp_thread_lock = _thread.allocate_lock()  # held while display_thread runs
 _disp_thread_crash = None  # backtrace text, written to flash by core 0
 
 @micropython.native
-def set_pen(disp, color):
-    """Set pen with dimming applied. Color is (R, G, B) tuple."""
-    # unpacked by hand: tuple(<generator>) and create_pen(*color) allocate
+def make_pen(color):
+    """Return the pen of color, an (R, G, B) tuple, with the dimming
+    applied: an RGB888 int, as PicoGraphics stores a pixel."""
+    # unpacked by hand: tuple(<generator>) allocates
     r, g, b = color
     dimming = _dimming
     if dimming != 10:
         r = r * dimming // 10
         g = g * dimming // 10
         b = b * dimming // 10
-    disp.set_pen(disp.create_pen(r, g, b))
+    return r << 16 | g << 8 | b
+
+def set_pen(disp, color):
+    """Set pen with dimming applied. Color is (R, G, B) tuple."""
+    disp.set_pen(make_pen(color))
+
+# the pen of ETA, DEST and the ticker, updated with the dimming
+_pen_bvg = make_pen(_BVG)
 
 _console_y = 0
 
@@ -344,14 +353,16 @@ def typ2col(t, l, subcol):
     return color
 
 @micropython.native
-def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
+def render_text(s, buf=None, x=0, bold=False, clip=None, kerning=False):
+    """Draw s into the text buffer buf at x, up to x = clip, and return its
+    width. With buf=None, only measure it."""
     if not s:
         return 0
+    stride = 0
+    if buf:
+        stride = (len(buf) - 4) >> 3  # see make_textbuf()
     if not clip:
-        if disp:
-            clip = disp.get_bounds()[0]
-        else:
-            clip = 0xffff
+        clip = stride * 8 if buf else 0xffff
     cursor_x = x
     # the font's tables, see font_bvg.py
     glyphs = font_bvg.GLYPHS
@@ -393,10 +404,11 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
             continue
         if kerning:
             last_col = glyphs[g + 2]
-        if disp:
+        if buf:
             for row in range(height):
                 r = g + 3 + 2 * row
                 byte_val = glyphs[r] << 8 | glyphs[r + 1]
+                line = row * stride
                 for col in range(width):
                     px = cursor_x + col
                     if px >= clip:
@@ -406,7 +418,7 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
                         # invisible
                         continue
                     if byte_val & (0x1 << (width - col)):
-                        disp.pixel(px, y + row)
+                        buf[line + (px >> 3)] |= 1 << (px & 7)
         # Move cursor for next character
         cursor_x += width
         if not kerning:
@@ -415,58 +427,86 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
 
 
 @micropython.viper
-def blit(dest: ptr32, src: ptr32, dst_off: uint, dst_width: uint, src_off: uint, src_width: uint, length: uint):
-    """fast copy of 8 lines from a text buffer to the display buffer
+def blit(dest: ptr32, b: uint, src: ptr32, pen: uint, dst_off: int, dst_width: int, src_off: int, src_width: int, length: int):
+    """Draw 8 lines of a text buffer (see make_textbuf()) into the frame
+    buffer, in pen. Only the lit pixels are written: the display thread
+    clears the frame buffer for every frame.
 
-    Hand-optimized for the display thread's frame budget: the 8x unrolled
-    copy and the pointer arithmetic are deliberate. Don't restructure or
-    "simplify" it without measuring frame times on the device.
+    Hand-optimized for the display thread's frame budget, so check the
+    generated code (mpy-cross -march=armv7emsp) when changing it. Viper
+    keeps only the first two locals in registers, so these are the ones
+    the inner loop needs: dest, and b, which is only scratch space (pass
+    0). Each 32 pixels are read at once, into b, and every empty group of
+    8 pixels is skipped with one test. The pen is stored with constant
+    offsets from dest.
 
-    Offsets and lengths are in pixels (4 bytes each, RGB888). There are no
-    bounds checks: callers must keep length >= 0 (a negative one becomes a
-    huge uint) and keep offset + length within the row width of both
-    buffers for all 8 rows. Out-of-range values silently corrupt memory,
-    so fix display glitches in the callers' arithmetic, not here.
+    Offsets and lengths are in pixels. src_width is the text buffer's
+    width, a multiple of 32. The source is read in whole words, up to one
+    word past the region (the padding of make_textbuf()). There are no
+    bounds checks: callers must keep offset + length within the row width
+    of both buffers for all 8 rows. Out-of-range values silently corrupt
+    memory, so fix display glitches in the callers' arithmetic, not here.
     """
-    dest = ptr32(uint(dest) + dst_off*4)
-    src = ptr32(uint(src) + src_off*4)
-    src_stop = uint(0)
-    l = uint(length & uint(0xFFFFFFF8))*4
-    r = uint(length & uint(0x7))*4
-    for n in range(8):
-        src_stop = uint(src) + l
-        while uint(src) < src_stop:
-            dest[0] = src[0]
-            dest = ptr32(uint(dest) + 4)
+    shift = uint(src_off) & 31
+    mask32 = uint(0xFFFFFFFF)  # a no-op on the MCU, for 64-bit test builds
+    d_line = uint(dest) + uint(dst_off) * 4
+    s_line = uint(src) + uint(src_off >> 5) * 4
+    row = 0
+    while row < 8:
+        src = ptr32(s_line)
+        d_word = d_line
+        n = length
+        while n > 0:
+            # the next 32 pixels, bit 0 the leftmost
+            b = ((uint(src[0]) >> shift) | ((uint(src[1]) << (31 - shift)) << 1)) & mask32
+            if n < 32:
+                b &= (uint(1) << uint(n)) - 1
+            dest = ptr32(d_word)
+            while b:
+                if b & 0xFF:
+                    if b & 1:
+                        dest[0] = pen
+                    if b & 2:
+                        dest[1] = pen
+                    if b & 4:
+                        dest[2] = pen
+                    if b & 8:
+                        dest[3] = pen
+                    if b & 16:
+                        dest[4] = pen
+                    if b & 32:
+                        dest[5] = pen
+                    if b & 64:
+                        dest[6] = pen
+                    if b & 128:
+                        dest[7] = pen
+                b >>= 8
+                dest = ptr32(uint(dest) + 32)
+            d_word += 128
             src = ptr32(uint(src) + 4)
-            dest[0] = src[0]
-            dest = ptr32(uint(dest) + 4)
-            src = ptr32(uint(src) + 4)
-            dest[0] = src[0]
-            dest = ptr32(uint(dest) + 4)
-            src = ptr32(uint(src) + 4)
-            dest[0] = src[0]
-            dest = ptr32(uint(dest) + 4)
-            src = ptr32(uint(src) + 4)
-            dest[0] = src[0]
-            dest = ptr32(uint(dest) + 4)
-            src = ptr32(uint(src) + 4)
-            dest[0] = src[0]
-            dest = ptr32(uint(dest) + 4)
-            src = ptr32(uint(src) + 4)
-            dest[0] = src[0]
-            dest = ptr32(uint(dest) + 4)
-            src = ptr32(uint(src) + 4)
-            dest[0] = src[0]
-            dest = ptr32(uint(dest) + 4)
-            src = ptr32(uint(src) + 4)
-        src_stop:uint = uint(src) + r
-        while uint(src) < src_stop:
-            dest[0] = src[0]
-            dest = ptr32(uint(dest) + 4)
-            src = ptr32(uint(src) + 4)
-        dest = ptr32(uint(dest) + (dst_width-length)*4)
-        src = ptr32(uint(src) + (src_width-length)*4)
+            n -= 32
+        d_line += uint(dst_width) * 4
+        s_line += uint(src_width >> 3)
+        row += 1
+
+@micropython.viper
+def clear_cols(buf: ptr8, stride: int, x: int, w: int):
+    """Clear the pixels x to x + w - 1 in all 8 lines of a text buffer with
+    stride bytes per line (see make_textbuf())."""
+    end = x + w
+    line = 0
+    while line < 8 * stride:
+        i = x
+        while i < end and (i & 7):
+            buf[line + (i >> 3)] &= 0xFF ^ (1 << (i & 7))
+            i += 1
+        while i + 8 <= end:
+            buf[line + (i >> 3)] = 0
+            i += 8
+        while i < end:
+            buf[line + (i >> 3)] &= 0xFF ^ (1 << (i & 7))
+            i += 1
+        line += stride
 
 def set_warn_msg(msg):
     """Show msg in the warning ticker ("" hides it), if it changed."""
@@ -477,11 +517,10 @@ def set_warn_msg(msg):
     render_warn_msg()
 
 def render_warn_msg():
-    """(Re-)render the current warning into the ticker buffer, e.g. after
-    the dimming changed."""
+    """Render the current warning into the ticker buffer."""
     global _warn_msg_sz
     msg = _warn_msg
-    warn_buf = _warn_buf[0]
+    warn_buf = _warn_buf
     # hide the ticker while it's re-rendered (or gone)
     _warn_msg_sz = 0
     if not msg:
@@ -490,10 +529,8 @@ def render_warn_msg():
     if msg_size > _WARN_BUF_SZ:
         print("WARNING: warn message too large:", msg_size)
     with _warn_buf_lock:
-        warn_buf.set_pen(_BG)
-        warn_buf.clear()
-        set_pen(warn_buf, _BVG)
-        render_text(msg, warn_buf, 0, 0, kerning=True, clip=_WARN_BUF_SZ)
+        clear_cols(warn_buf, _WARN_BUF_SZ // 8, 0, _WARN_BUF_SZ)
+        render_text(msg, warn_buf, 0, kerning=True, clip=_WARN_BUF_SZ)
         _warn_msg_sz = min(msg_size, _WARN_BUF_SZ)
     print("updated warn message")
 
@@ -504,7 +541,7 @@ _separator_sz = render_text(_separator, kerning=True)
 def display_thread():
     global _disp_thread_crash
     print("display_thread started")
-    warn_mv = _warn_buf[1]
+    warn_buf = _warn_buf
     warn_buf_lock = _warn_buf_lock
     _disp_thread_lock.acquire()
     try:
@@ -534,7 +571,8 @@ def display_thread():
         disp.set_pen(0)
         while not _disp_thread_stop:
             n = n_textlines
-            disp.clear()
+            disp.clear()  # blit() only draws the lit pixels
+            pen = _pen_bvg
             dest_off = _dest_offset
             line_width = dest_off - _COL_GAP
             dest_width = disp_width - line_width - _ETA_WIDTH - 2*_COL_GAP
@@ -552,31 +590,30 @@ def display_thread():
                 if warn_x >= warn_msg_sz:
                     warn_x = 0
                 if warn_x > warn_msg_sz-disp_width:
-                    blit(disp_mv, warn_mv, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, warn_msg_sz-warn_x)
-                    blit(disp_mv, warn_mv, warn_y*disp_width+warn_msg_sz-warn_x, disp_width, 0, _WARN_BUF_SZ, disp_width-warn_msg_sz+warn_x)
+                    blit(disp_mv, 0, warn_buf, pen, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, warn_msg_sz-warn_x)
+                    blit(disp_mv, 0, warn_buf, pen, warn_y*disp_width+warn_msg_sz-warn_x, disp_width, 0, _WARN_BUF_SZ, disp_width-warn_msg_sz+warn_x)
                 else:
-                    blit(disp_mv, warn_mv, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, disp_width)
+                    blit(disp_mv, 0, warn_buf, pen, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, disp_width)
                 warn_buf_lock.release()
                 warn_x += 1
                 n = n_textlines - 1
             for i in range(n):
-                buf, mv, locks, states = textlines[i]
+                buf, locks, states = textlines[i]
                 row_y = (row_y0 + i * row_h)
                 row_offset = row_y * disp_width
                 # ETA column
                 if locks[_S_ETA].acquire(False):
-                    blit(disp_mv, mv, row_offset + disp_width - _ETA_WIDTH, disp_width, 0, _TEXT_BUF_SZ, _ETA_WIDTH)
+                    blit(disp_mv, 0, buf, pen, row_offset + disp_width - _ETA_WIDTH, disp_width, 0, _TEXT_BUF_SZ, _ETA_WIDTH)
                     locks[_S_ETA].release()
                 # LINE column
                 if locks[_S_LINE].acquire(False):
-                    blit(disp_mv, mv, row_offset, disp_width, _ETA_WIDTH, _TEXT_BUF_SZ, line_width)
+                    blit(disp_mv, 0, buf, states[_S_LINE_PEN], row_offset, disp_width, _ETA_WIDTH, _TEXT_BUF_SZ, line_width)
                     locks[_S_LINE].release()
                 # DEST column
                 if locks[_S_DEST].acquire(False):
                     dest_sz = states[_S_DEST_SZ]
                     show = True
                     if states[_S_BLINKING] and blink_hide:
-                        disp.rectangle(dest_off, row_y, dest_width, 8)
                         show = False
                     if dest_sz > dest_width:
                         dest_sz += min(separator_sz, _TEXT_BUF_SZ - _ETA_WIDTH - line_width - dest_sz)
@@ -593,13 +630,12 @@ def display_thread():
                             x = 0
                         if show:
                             if x > dest_sz-dest_width:
-                                blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_sz-x)
-                                blit(disp_mv, mv, row_offset + dest_off + dest_sz - x, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width-dest_sz+x)
+                                blit(disp_mv, 0, buf, pen, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_sz-x)
+                                blit(disp_mv, 0, buf, pen, row_offset + dest_off + dest_sz - x, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width-dest_sz+x)
                             else:
-                                blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_width)
+                                blit(disp_mv, 0, buf, pen, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_width)
                     elif show:
-                        disp.rectangle(dest_off, row_y, dest_width, 8)
-                        blit(disp_mv, mv, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_sz)
+                        blit(disp_mv, 0, buf, pen, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_sz)
                     locks[_S_DEST].release()
             if ticks_diff(t1, t_blink) > 0:
                 t_blink = ticks_add(t_blink, _BLINK_DELAY_MS)
@@ -641,7 +677,7 @@ def asyncio_exception_handler(loop, context):
 
 # states of a textline that is blank. The ETA is kept in minutes, as an
 # int, so that its text is only built when it changes.
-_empty_states = [None, "", "", 0, 0, False]
+_empty_states = [None, "", "", 0, 0, False, 0]
 
 # render_row() and clear_row() are native: as bytecode, their frames are
 # too big for the C stack (over 11 words), so every call would allocate
@@ -651,18 +687,16 @@ def render_row(i, eta, line, line_size, typ, dest, bg_col, line_width, force, co
     """Redraw the changed columns of text row i, each under its own lock.
     eta is in minutes, 0 for "now" (blinking, without text). line_size is
     the width of the line name. Returns whether DEST was redrawn."""
-    tl_buf, _, locks, states = _textlines[i]
+    tl_buf, locks, states = _textlines[i]
 
     # render ETA at beginning of textline buffer
     if eta != states[_S_ETA] or force:
         eta_s = "%d'" % eta if eta else ""
         eta_size = render_text(eta_s)
         with locks[_S_ETA]:
-            tl_buf.set_pen(_BG)
-            tl_buf.rectangle(0, 0, _ETA_WIDTH, 8)
+            clear_cols(tl_buf, _TEXT_BUF_SZ // 8, 0, _ETA_WIDTH)
             if eta_s:
-                set_pen(tl_buf, _BVG)
-                render_text(eta_s, tl_buf, _ETA_WIDTH - eta_size + 1, 0, clip=_ETA_WIDTH)
+                render_text(eta_s, tl_buf, _ETA_WIDTH - eta_size + 1, clip=_ETA_WIDTH)
             states[_S_ETA] = eta
             states[_S_BLINKING] = not eta
             print("updated ETA of line", i)
@@ -670,26 +704,24 @@ def render_row(i, eta, line, line_size, typ, dest, bg_col, line_width, force, co
     # then render LINE
     if line != states[_S_LINE] or force:
         line_offset = max(line_width - line_size, 0)
+        if sub_colors and bg_col:
+            color = bg_col
+        elif colored:
+            color = typ2col(typ, line, sub_colors)
+        else:
+            color = _BVG
         with locks[_S_LINE]:
-            tl_buf.set_pen(_BG)
-            tl_buf.rectangle(_ETA_WIDTH, 0, line_width, 8)
-            if sub_colors and bg_col:
-                set_pen(tl_buf, bg_col)
-            elif colored:
-                set_pen(tl_buf, typ2col(typ, line, sub_colors))
-            else:
-                set_pen(tl_buf, _BVG)
-            render_text(line, tl_buf, _ETA_WIDTH + line_offset, 0, bold=True, clip=_ETA_WIDTH+line_width, kerning=True)
+            clear_cols(tl_buf, _TEXT_BUF_SZ // 8, _ETA_WIDTH, line_width)
+            render_text(line, tl_buf, _ETA_WIDTH + line_offset, bold=True, clip=_ETA_WIDTH+line_width, kerning=True)
             states[_S_LINE] = line
+            states[_S_LINE_PEN] = make_pen(color)
             print("updated LINE of line", i)
 
     # last is DEST, because it has flexible length
     if dest != states[_S_DEST] or force:
         with locks[_S_DEST]:
-            tl_buf.set_pen(_BG)
-            tl_buf.rectangle(_ETA_WIDTH + line_width, 0, _TEXT_BUF_SZ - _ETA_WIDTH - line_width, 8)
-            set_pen(tl_buf, _BVG)
-            states[_S_DEST_SZ] = render_text(dest + _separator, tl_buf, _ETA_WIDTH + line_width, 0, clip=_TEXT_BUF_SZ - _ETA_WIDTH - line_width, kerning=True) - _separator_sz
+            clear_cols(tl_buf, _TEXT_BUF_SZ // 8, _ETA_WIDTH + line_width, _TEXT_BUF_SZ - _ETA_WIDTH - line_width)
+            states[_S_DEST_SZ] = render_text(dest + _separator, tl_buf, _ETA_WIDTH + line_width, clip=_TEXT_BUF_SZ - _ETA_WIDTH - line_width, kerning=True) - _separator_sz
             states[_S_DEST] = dest
             # reset now, so the display thread never combines the
             # new dest size with the old scroll offset; render_task
@@ -702,19 +734,18 @@ def render_row(i, eta, line, line_size, typ, dest, bg_col, line_width, force, co
 @micropython.native
 def clear_row(i):
     """Blank text row i, unless it is blank already."""
-    tl_buf, _, locks, states = _textlines[i]
+    tl_buf, locks, states = _textlines[i]
     if states == _empty_states:
         return
     for lock in locks:
         lock.acquire()
-    tl_buf.set_pen(_BG)
-    tl_buf.clear()
+    clear_cols(tl_buf, _TEXT_BUF_SZ // 8, 0, _TEXT_BUF_SZ)
     states[:] = _empty_states
     for lock in locks:
         lock.release()
 
 async def render_task():
-    global _dest_offset, _textlines
+    global _dest_offset
     print("render task started")
     await asyncio.sleep(5) # give a chance to read the IP address
     colored = False
@@ -723,17 +754,6 @@ async def render_task():
     console("waiting for data...")
     while _dep_data == None:
         await asyncio.sleep_ms(100)
-    gc.collect()
-    # _textlines[row] structure: ETA|LINE|DEST
-    _textlines = []
-    for _ in range(_n_textlines):
-        buf, mv = make_textbuf(_TEXT_BUF_SZ)
-        _textlines.append((
-            buf, mv,
-            (_thread.allocate_lock(), _thread.allocate_lock(),_thread.allocate_lock()),
-            _empty_states[:]
-        ))
-
     _thread.start_new_thread(display_thread, ())
     _safe_to_fetch.clear()
     t1 = time.ticks_ms()
@@ -781,11 +801,11 @@ async def render_task():
             # restart the scrolling of all updated rows together
             for j in range(i):
                 if dest_redrawn & (1 << j):
-                    _textlines[j][2][_S_DEST].acquire()
-                    _textlines[j][3][_S_DEST_X] = _DEST_SCROLL_INIT
+                    _textlines[j][1][_S_DEST].acquire()
+                    _textlines[j][2][_S_DEST_X] = _DEST_SCROLL_INIT
             for j in range(i):
                 if dest_redrawn & (1 << j):
-                    _textlines[j][2][_S_DEST].release()
+                    _textlines[j][1][_S_DEST].release()
 
             for j in range(i, _n_textlines):
                 clear_row(j)
@@ -1043,7 +1063,7 @@ async def data_fetch_task():
 
 async def check_night_time_task():
     """Check if current time is within night hours"""
-    global _dimming
+    global _dimming, _pen_bvg
     while not _time_set:
         await asyncio.sleep(1)
     while True:
@@ -1078,7 +1098,7 @@ async def check_night_time_task():
             if _dimming != dim:
                 print("changing dimming")
                 _dimming = dim
-                render_warn_msg()
+                _pen_bvg = make_pen(_BVG)
         except Exception as e:
             crashlog.print_error("night time check failed", e)
 
@@ -1121,7 +1141,11 @@ banner()
 
 gc.collect()
 
-# only now: the big ticker buffer needs the memory banner() just freed
+# _textlines[row]: (buffer, locks, states); the buffer holds ETA|LINE|DEST
+_textlines = [(make_textbuf(_TEXT_BUF_SZ),
+               (_thread.allocate_lock(), _thread.allocate_lock(), _thread.allocate_lock()),
+               _empty_states[:])
+              for _ in range(_n_textlines)]
 _warn_buf = make_textbuf(_WARN_BUF_SZ)
 _warn_buf_lock = _thread.allocate_lock()
 _warn_msg = ""

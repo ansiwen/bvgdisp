@@ -36,12 +36,13 @@ Two cores, with a strict split:
 2. **Core 1, `display_thread`**: runs at `_FRAME_RATE` (30 fps), composes each frame by `blit()`ing regions of the text buffers into the framebuffer, and calls `_h75.update()`. It also does destination scrolling, blinking for "now" departures, and the warning ticker that takes over the bottom row from time to time. With `Hub75` it busy-waits for the frame time, which is deliberate, to avoid flicker. With `Hub75SPWM`, `update()` waits for the panel's refresh instead, which runs at `_SPWM_SYNC * _FRAME_RATE`.
 
 Data structures and sync:
-- Each text row is one off-screen buffer laid out as `[ETA][LINE][DEST + " - " ...]`, with one lock per column and a `states` list indexed by the `_S_*` constants. The warning ticker has its own wide buffer and lock.
+- Each text row is one off-screen buffer laid out as `[ETA][LINE][DEST + " - " ...]`, with one lock per column and a `states` list indexed by the `_S_*` constants. The warning ticker has its own wide buffer and lock. All of them are allocated at startup.
+- The text buffers have **1 bit per pixel and no color** (`make_textbuf()`). `blit()` draws only the lit pixels, in a pen, so the display thread clears the frame before drawing it. `render_text()` sets the bits and `clear_cols()` clears column ranges.
 - The render task takes a column's lock while it redraws that column. **The display thread must never block on a lock**: it tries with `acquire(False)` and skips that part for the frame if it's busy. Keep the renderer's critical sections short.
 - **Don't create globals once the display thread runs**, eg. with a new `global` name in a task. There is no GIL on rp2: adding an entry to the module dict while core 1 looks up a global can make that lookup fail with a random `NameError`. Define shared state at module level, before the thread starts.
 - Fetching and JSON parsing are memory-heavy: they wait for a finished render cycle (`_safe_to_fetch`) and run after `gc.collect()`.
-- Colors are `(R, G, B)` tuples. Always draw through `set_pen(disp, color)` so dimming is applied.
-- `render_text(s, disp=None, ...)` with `disp=None` only measures text width.
+- Colors are `(R, G, B)` tuples. `make_pen()` turns one into a pen, an RGB888 int, with the dimming applied. ETA, DEST and the ticker are drawn in `_pen_bvg`, which `check_night_time_task` updates with the dimming; each row keeps its LINE pen in `states`. Draw on the display itself through `set_pen(disp, color)`.
+- `render_text(s, buf=None, ...)` with `buf=None` only measures text width.
 
 Layout: on 64 px panels the rows start at y=1 with a 9 px pitch. On 32 px panels they start at y=0 with an 8 px pitch. The LINE column grows to fit the widest line name seen, and shrinks back when settings change.
 
