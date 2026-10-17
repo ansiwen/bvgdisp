@@ -153,6 +153,10 @@ class fake_time:
     def ticks_ms():
         fake_time.T[0] += 1
         return fake_time.T[0]
+    U = [0]
+    def ticks_us():  # for _FRAME_STATS
+        fake_time.U[0] += 37
+        return fake_time.U[0]
     ticks_add = _time.ticks_add
     ticks_diff = _time.ticks_diff
     def time(): return NOW  # an int, as on rp2 (the unix port returns a float)

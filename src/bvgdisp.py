@@ -27,6 +27,11 @@ _WARN_BUF_SZ = const(4096)
 _RECV_BUF_SZ = const(48 * 1024)
 
 _FRAME_RATE = const(30)
+# Frame timing: True makes the display thread measure every frame, and the
+# render task print averages and maxima every _FRAME_STATS_N frames. With
+# False the compiler drops all of it.
+_FRAME_STATS = const(False)
+_FRAME_STATS_N = const(300)
 # S-PWM panels: refresh at _SPWM_SYNC * _FRAME_RATE, each frame is shown for
 # exactly _SPWM_SYNC refreshes
 _SPWM_SYNC = const(2)
@@ -120,6 +125,9 @@ _safe_to_fetch.set()
 _disp_thread_stop = False
 _disp_thread_lock = _thread.allocate_lock()  # held while display_thread runs
 _disp_thread_crash = None  # backtrace text, written to flash by core 0
+# with _FRAME_STATS: reports count, then average and maximum in us of
+# clearing, drawing, update() and the frame period, set by display_thread
+_frame_stats = [0] * 9
 
 @micropython.native
 def make_pen(color):
@@ -631,6 +639,12 @@ def display_thread():
         ticks_ms = time.ticks_ms
         ticks_add = time.ticks_add
         ticks_diff = time.ticks_diff
+        if _FRAME_STATS:
+            ticks_us = time.ticks_us
+            stats = _frame_stats
+            st_n = st_clear = st_draw = st_upd = st_per = 0
+            mx_clear = mx_draw = mx_upd = mx_per = 0
+            t_prev = ticks_us()
         t1 = ticks_ms()
         t_blink = t1
         t_warn = t1
@@ -640,8 +654,12 @@ def display_thread():
         dest_off = 0
         disp.set_pen(0)
         while not _disp_thread_stop:
+            if _FRAME_STATS:
+                t_frame = ticks_us()
             n = n_textlines
             disp.clear()  # blit() only draws the lit pixels
+            if _FRAME_STATS:
+                t_cleared = ticks_us()
             pen = _pen_bvg
             dest_off = _dest_offset
             line_width = dest_off - _COL_GAP
@@ -710,19 +728,55 @@ def display_thread():
             if ticks_diff(t1, t_blink) > 0:
                 t_blink = ticks_add(t_blink, _BLINK_DELAY_MS)
                 blink_hide = not blink_hide
-            # elapsed = time.ticks_diff(time.ticks_ms(), t1)
-            # print("elapsed", elapsed)
+            if _FRAME_STATS:
+                t_drawn = ticks_us()
             t1 = ticks_add(t1, _FRAME_DELAY_MS)
             if spwm:
                 # waits for the panel refresh, so every frame is shown for
                 # exactly _FRAME_DELAY_MS, and t1 keeps up with it
+                if _FRAME_STATS:
+                    t_upd = ticks_us()
                 h75.update(disp, _SPWM_SYNC)
             else:
                 # busy loop on core 2 to avoid flickering
                 while True:
                     if ticks_diff(ticks_ms(), t1) >= 0:
                         break
+                if _FRAME_STATS:
+                    t_upd = ticks_us()
                 h75.update(disp)
+            if _FRAME_STATS:
+                # only small ints: this must not allocate either
+                d = ticks_diff(t_cleared, t_frame)
+                st_clear += d
+                if d > mx_clear:
+                    mx_clear = d
+                d = ticks_diff(t_drawn, t_cleared)
+                st_draw += d
+                if d > mx_draw:
+                    mx_draw = d
+                d = ticks_diff(ticks_us(), t_upd)
+                st_upd += d
+                if d > mx_upd:
+                    mx_upd = d
+                d = ticks_diff(t_frame, t_prev)
+                t_prev = t_frame
+                st_per += d
+                if d > mx_per:
+                    mx_per = d
+                st_n += 1
+                if st_n == _FRAME_STATS_N:
+                    stats[1] = st_clear // st_n
+                    stats[2] = mx_clear
+                    stats[3] = st_draw // st_n
+                    stats[4] = mx_draw
+                    stats[5] = st_upd // st_n
+                    stats[6] = mx_upd
+                    stats[7] = st_per // st_n
+                    stats[8] = mx_per
+                    stats[0] += 1  # last: the render task prints on a change
+                    st_n = st_clear = st_draw = st_upd = st_per = 0
+                    mx_clear = mx_draw = mx_upd = mx_per = 0
     except Exception as e:
         print(f"display thread failed: {e}")
         _disp_thread_crash = crashlog.format_exception("display_thread", e)
@@ -830,9 +884,15 @@ async def render_task():
     t1 = time.ticks_ms()
     line_size_max = _LINE_MIN_WIDTH
     dim = 10
+    stats_seen = 0
     while True:
         if _disp_thread_crash:
             write_disp_thread_crash()
+        if _FRAME_STATS and _frame_stats[0] != stats_seen:
+            st = _frame_stats
+            stats_seen = st[0]
+            print("frame us avg/max: clear", st[1], st[2], "draw", st[3], st[4],
+                  "update", st[5], st[6], "period", st[7], st[8])
         try:
             data = _dep_data
             now = time.time()
