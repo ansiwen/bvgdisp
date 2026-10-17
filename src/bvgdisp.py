@@ -426,19 +426,116 @@ def render_text(s, buf=None, x=0, bold=False, clip=None, kerning=False):
     return cursor_x - x
 
 
+# blit()'s parameters for blit_asm(), 8 words; only the display thread
+# uses them
+_blit_params = bytearray(32)
+
+@micropython.asm_thumb
+def blit_asm(r0, r1):
+    # The inner loop of blit(). r0: _blit_params, r1: the pen. The words of
+    # r0: 0 dest address of the current line, 1 src address of its first
+    # word, 2 lines left, 3 shift right, 4 shift left (32 - shift), 5 the
+    # length in pixels, 6 dest bytes per line, 7 src bytes per line.
+    # Only Thumb-1 instructions, so this runs on the RP2040 (M0+) as well
+    # as on the RP2350 (M33): no IT, conditional branches instead.
+    label(LINE)
+    ldr(r4, [r0, 0])      # r4: dest of the current word
+    ldr(r3, [r0, 4])      # r3: src word
+    ldr(r2, [r0, 20])     # r2: pixels left
+    cmp(r2, 0)
+    ble(NEXTLINE)
+    label(WORD)
+    ldr(r5, [r3, 0])      # r5: the next 32 pixels, bit 0 the leftmost
+    ldr(r7, [r0, 12])
+    lsr(r5, r7)
+    ldr(r6, [r3, 4])
+    ldr(r7, [r0, 16])
+    lsl(r6, r7)           # a shift by 32 gives 0
+    orr(r5, r6)
+    cmp(r2, 32)
+    bge(FULL)
+    mov(r7, 1)            # the last word: only r2 pixels
+    lsl(r7, r2)
+    sub(r7, 1)
+    and_(r5, r7)
+    label(FULL)
+    mov(r6, r4)           # r6: dest of the current 8 pixels
+    cmp(r5, 0)
+    beq(NEXTWORD)
+    label(GROUP)
+    lsl(r7, r5, 24)       # the next 8 pixels empty?
+    beq(EMPTY)
+    # each pixel: its bit into the carry flag, then store the pen if set
+    lsr(r5, r5, 1)
+    bcc(P0)
+    str(r1, [r6, 0])
+    label(P0)
+    lsr(r5, r5, 1)
+    bcc(P1)
+    str(r1, [r6, 4])
+    label(P1)
+    lsr(r5, r5, 1)
+    bcc(P2)
+    str(r1, [r6, 8])
+    label(P2)
+    lsr(r5, r5, 1)
+    bcc(P3)
+    str(r1, [r6, 12])
+    label(P3)
+    lsr(r5, r5, 1)
+    bcc(P4)
+    str(r1, [r6, 16])
+    label(P4)
+    lsr(r5, r5, 1)
+    bcc(P5)
+    str(r1, [r6, 20])
+    label(P5)
+    lsr(r5, r5, 1)
+    bcc(P6)
+    str(r1, [r6, 24])
+    label(P6)
+    lsr(r5, r5, 1)
+    bcc(P7)
+    str(r1, [r6, 28])
+    label(P7)
+    b(GNEXT)
+    label(EMPTY)
+    lsr(r5, r5, 8)
+    label(GNEXT)
+    add(r6, 32)
+    cmp(r5, 0)
+    bne(GROUP)
+    label(NEXTWORD)
+    add(r3, 4)
+    add(r4, 128)
+    sub(r2, 32)
+    bgt(WORD)
+    label(NEXTLINE)
+    ldr(r4, [r0, 0])
+    ldr(r7, [r0, 24])
+    add(r4, r4, r7)
+    str(r4, [r0, 0])
+    ldr(r3, [r0, 4])
+    ldr(r7, [r0, 28])
+    add(r3, r3, r7)
+    str(r3, [r0, 4])
+    ldr(r7, [r0, 8])
+    sub(r7, 1)
+    str(r7, [r0, 8])
+    bne(LINE)
+
 @micropython.viper
-def blit(dest: ptr32, b: uint, src: ptr32, pen: uint, dst_off: int, dst_width: int, src_off: int, src_width: int, length: int):
+def blit(dest: ptr32, src: ptr32, pen: uint, dst_off: int, dst_width: int, src_off: int, src_width: int, length: int):
     """Draw 8 lines of a text buffer (see make_textbuf()) into the frame
     buffer, in pen. Only the lit pixels are written: the display thread
-    clears the frame buffer for every frame.
+    clears the frame buffer for every frame. Call it only from the display
+    thread, which owns _blit_params.
 
-    Hand-optimized for the display thread's frame budget, so check the
-    generated code (mpy-cross -march=armv7emsp) when changing it. Viper
-    keeps only the first two locals in registers, so these are the ones
-    the inner loop needs: dest, and b, which is only scratch space (pass
-    0). Each 32 pixels are read at once, into b, and every empty group of
-    8 pixels is skipped with one test. The pen is stored with constant
-    offsets from dest.
+    The work is done by blit_asm(), hand-written for the display thread's
+    frame budget: it reads 32 pixels at once, skips every empty group of 8
+    pixels with one test, and spends 3 instructions on a pixel. Check
+    changes to it in an emulator or on both MCUs: the unix port can't run
+    it.
 
     Offsets and lengths are in pixels. src_width is the text buffer's
     width, a multiple of 32. The source is read in whole words, up to one
@@ -447,47 +544,16 @@ def blit(dest: ptr32, b: uint, src: ptr32, pen: uint, dst_off: int, dst_width: i
     of both buffers for all 8 rows. Out-of-range values silently corrupt
     memory, so fix display glitches in the callers' arithmetic, not here.
     """
-    shift = uint(src_off) & 31
-    mask32 = uint(0xFFFFFFFF)  # a no-op on the MCU, for 64-bit test builds
-    d_line = uint(dest) + uint(dst_off) * 4
-    s_line = uint(src) + uint(src_off >> 5) * 4
-    row = 0
-    while row < 8:
-        src = ptr32(s_line)
-        d_word = d_line
-        n = length
-        while n > 0:
-            # the next 32 pixels, bit 0 the leftmost
-            b = ((uint(src[0]) >> shift) | ((uint(src[1]) << (31 - shift)) << 1)) & mask32
-            if n < 32:
-                b &= (uint(1) << uint(n)) - 1
-            dest = ptr32(d_word)
-            while b:
-                if b & 0xFF:
-                    if b & 1:
-                        dest[0] = pen
-                    if b & 2:
-                        dest[1] = pen
-                    if b & 4:
-                        dest[2] = pen
-                    if b & 8:
-                        dest[3] = pen
-                    if b & 16:
-                        dest[4] = pen
-                    if b & 32:
-                        dest[5] = pen
-                    if b & 64:
-                        dest[6] = pen
-                    if b & 128:
-                        dest[7] = pen
-                b >>= 8
-                dest = ptr32(uint(dest) + 32)
-            d_word += 128
-            src = ptr32(uint(src) + 4)
-            n -= 32
-        d_line += uint(dst_width) * 4
-        s_line += uint(src_width >> 3)
-        row += 1
+    p = ptr32(_blit_params)
+    p[0] = uint(dest) + uint(dst_off) * 4
+    p[1] = uint(src) + uint(src_off >> 5) * 4
+    p[2] = 8
+    p[3] = src_off & 31
+    p[4] = 32 - (src_off & 31)
+    p[5] = length
+    p[6] = dst_width * 4
+    p[7] = src_width >> 3
+    blit_asm(_blit_params, pen)
 
 @micropython.viper
 def clear_cols(buf: ptr8, stride: int, x: int, w: int):
@@ -590,10 +656,10 @@ def display_thread():
                 if warn_x >= warn_msg_sz:
                     warn_x = 0
                 if warn_x > warn_msg_sz-disp_width:
-                    blit(disp_mv, 0, warn_buf, pen, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, warn_msg_sz-warn_x)
-                    blit(disp_mv, 0, warn_buf, pen, warn_y*disp_width+warn_msg_sz-warn_x, disp_width, 0, _WARN_BUF_SZ, disp_width-warn_msg_sz+warn_x)
+                    blit(disp_mv, warn_buf, pen, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, warn_msg_sz-warn_x)
+                    blit(disp_mv, warn_buf, pen, warn_y*disp_width+warn_msg_sz-warn_x, disp_width, 0, _WARN_BUF_SZ, disp_width-warn_msg_sz+warn_x)
                 else:
-                    blit(disp_mv, 0, warn_buf, pen, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, disp_width)
+                    blit(disp_mv, warn_buf, pen, warn_y*disp_width, disp_width, warn_x, _WARN_BUF_SZ, disp_width)
                 warn_buf_lock.release()
                 warn_x += 1
                 n = n_textlines - 1
@@ -603,11 +669,11 @@ def display_thread():
                 row_offset = row_y * disp_width
                 # ETA column
                 if locks[_S_ETA].acquire(False):
-                    blit(disp_mv, 0, buf, pen, row_offset + disp_width - _ETA_WIDTH, disp_width, 0, _TEXT_BUF_SZ, _ETA_WIDTH)
+                    blit(disp_mv, buf, pen, row_offset + disp_width - _ETA_WIDTH, disp_width, 0, _TEXT_BUF_SZ, _ETA_WIDTH)
                     locks[_S_ETA].release()
                 # LINE column
                 if locks[_S_LINE].acquire(False):
-                    blit(disp_mv, 0, buf, states[_S_LINE_PEN], row_offset, disp_width, _ETA_WIDTH, _TEXT_BUF_SZ, line_width)
+                    blit(disp_mv, buf, states[_S_LINE_PEN], row_offset, disp_width, _ETA_WIDTH, _TEXT_BUF_SZ, line_width)
                     locks[_S_LINE].release()
                 # DEST column
                 if locks[_S_DEST].acquire(False):
@@ -630,12 +696,12 @@ def display_thread():
                             x = 0
                         if show:
                             if x > dest_sz-dest_width:
-                                blit(disp_mv, 0, buf, pen, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_sz-x)
-                                blit(disp_mv, 0, buf, pen, row_offset + dest_off + dest_sz - x, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width-dest_sz+x)
+                                blit(disp_mv, buf, pen, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_sz-x)
+                                blit(disp_mv, buf, pen, row_offset + dest_off + dest_sz - x, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_width-dest_sz+x)
                             else:
-                                blit(disp_mv, 0, buf, pen, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_width)
+                                blit(disp_mv, buf, pen, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width+x, _TEXT_BUF_SZ, dest_width)
                     elif show:
-                        blit(disp_mv, 0, buf, pen, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_sz)
+                        blit(disp_mv, buf, pen, row_offset + dest_off, disp_width, _ETA_WIDTH+line_width, _TEXT_BUF_SZ, dest_sz)
                     locks[_S_DEST].release()
             if ticks_diff(t1, t_blink) > 0:
                 t_blink = ticks_add(t_blink, _BLINK_DELAY_MS)
