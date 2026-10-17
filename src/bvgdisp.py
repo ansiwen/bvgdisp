@@ -343,11 +343,6 @@ def typ2col(t, l, subcol):
         return _WHITE
     return color
 
-# the bold glyphs by their character, so that render_text() doesn't have
-# to build "*" + char for every character
-_font_bold = {k[1:]: v for k, v in font_bvg.font_small.items()
-              if len(k) == 2 and k[0] == "*"}
-
 @micropython.native
 def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
     if not s:
@@ -358,38 +353,50 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
         else:
             clip = 0xffff
     cursor_x = x
-    font = font_bvg.font_small
-    font_bold = _font_bold
-    height = font["fontheight"]
+    # the font's tables, see font_bvg.py
+    glyphs = font_bvg.GLYPHS
+    glyph_size = font_bvg.GLYPH_SIZE
+    extra = font_bvg.EXTRA
+    if bold:
+        ascii_idx = font_bvg.BOLD_ASCII
+        extra_idx = font_bvg.BOLD_EXTRA_GLYPHS
+    else:
+        ascii_idx = font_bvg.ASCII
+        extra_idx = font_bvg.EXTRA_GLYPHS
+    height = font_bvg.HEIGHT
     last_col = 0
     for char in s:
         if cursor_x >= clip:
             # invisible
             break
-        glyph = (bold and font_bold.get(char)) or font.get(char)
-        if glyph is None:
+        g = ord(char) - 32
+        if 0 <= g < 95:
+            g = ascii_idx[g]
+        else:
+            g = extra.find(char)
+            g = extra_idx[g] if g >= 0 else 0
+        if not g:
             print("missing character:", char)
             continue
-        width = glyph[0] - 1
+        g = (g - 1) * glyph_size  # the glyph's offset in glyphs
+        width = glyphs[g] - 1
         if kerning:
-            for row in range(height):
-                check = glyph[row + 1] >> width and ((last_col & (0b111<<row)) != 0)
-                if check:
-                    cursor_x += 1
-                    break
+            # one more pixel of space if the glyphs would touch: the left
+            # column has a pixel in the same row as one in the last glyph's
+            # right column, or in a row next to it
+            if glyphs[g + 1] & (last_col | last_col << 1 | last_col >> 1):
+                cursor_x += 1
             last_col = 0
         if cursor_x + width + 8 <= x:
             # invisible
             cursor_x += width
             continue
-        # when only measuring, the rows matter just for kerning
-        if disp or kerning:
+        if kerning:
+            last_col = glyphs[g + 2]
+        if disp:
             for row in range(height):
-                byte_val = glyph[row + 1]
-                if kerning:
-                    last_col |= (byte_val&2)<<row
-                if not disp:
-                    continue
+                r = g + 3 + 2 * row
+                byte_val = glyphs[r] << 8 | glyphs[r + 1]
                 for col in range(width):
                     px = cursor_x + col
                     if px >= clip:

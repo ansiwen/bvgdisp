@@ -20,7 +20,7 @@ BVG (Berlin transit) departure display: a Raspberry Pi Pico W / Pico 2 W (usuall
 - `src/settings.py`: settings dict merged over `DEFAULT_SETTINGS`. `set()` writes to flash and raises a flag that `check()` reads and clears. Only keys already in `DEFAULT_SETTINGS` are accepted, so **a new setting must be added there first**.
 - `src/crashlog.py`: timestamped backtraces, appended to `/crash.log` on flash.
 - `src/web_server.py`: a hand-rolled asyncio HTTP server. The whole config SPA is `src/assets/index.html`, sent from flash in 1 KB chunks so it never sits in RAM. JSON API: `/api/auth/{challenge,login,logout,password}`, `/api/settings` (GET/POST), `/api/restart`. Auth is challenge-response: the client sends `SHA256(PASSWORD_HASH + nonce)`, gets a session token, and sends it back in the `X-Session` header. The default password is `BVGdisp`.
-- `src/font_bvg.py`: a custom 8px bitmap font, `font_small`. A missing glyph is skipped, so add glyphs here for new umlauts or symbols.
+- `font/font_small.py`: the source of the custom 8px bitmap font, as readable bitmaps. A missing glyph is skipped, so add glyphs here for new umlauts or symbols, then run `python3 font/mkfont.py`. It generates `src/font_bvg.py`, the font as `bytes` tables for `render_text()`, which stay in flash when frozen. CI fails if the generated file is out of date.
 - `src/hw_conf.py`: picks the panel size (`DISPLAY_INTERSTATE75_*`) and `COLOR_ORDER`. `PANEL` selects the `Hub75SPWM` driver for panels with S-PWM chips, with the chip registers from the optional `SPWM_PROFILE`. This is per-device configuration.
 - `src/assetfiles.py`: opens the files in `src/assets/`, from the device or the firmware.
 - `src/assets/*.png`: images for the boot banner.
