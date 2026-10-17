@@ -49,6 +49,7 @@ Boot and network: without an SSID, or when connecting fails, the device starts a
 
 ## Conventions and gotchas
 
+- Priorities, in this order: 1. performance, but only at hot spots (`display_thread`, `blit()`, and what the render task does every second); 2. GC pressure: no garbage in steady state, and big buffers allocated once at startup; 3. total RAM usage. The firmware with everything frozen in is what counts, so eg. native code costs flash, not RAM.
 - Code is tuned for speed on the MCU. Module constants use `const()` with a leading underscore, which makes them compile-time and keeps them out of the module dict. Hot functions copy globals into locals and use `@micropython.native`/`viper`. Keep these patterns when you edit hot paths, and avoid allocating inside `display_thread`.
 - `blit()` has no bounds checks, so callers are responsible for offsets and lengths; see its docstring.
 - `time.ticks_ms()` wraps at 2³⁰ ms (about 12.4 days) on rp2. Never compare or add ticks with `>`/`+`. Always use `time.ticks_diff()`/`time.ticks_add()`.
