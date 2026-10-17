@@ -17,11 +17,12 @@ _ETA_WIDTH = const(11)
 _COL_GAP = const(3)
 
 # widths in pixels of the 1-bit text buffers, multiples of 32, see blit()
-_TEXT_BUF_SZ = const(384)
-_WARN_BUF_SZ = const(2560)
+_TEXT_BUF_SZ = const(512)
+_WARN_BUF_SZ = const(4096)
 # a whole HTTP response, headers included. With the default 14 results,
-# v6.bvg.transport.rest sends about 19 KB, vbb.a6n.de about 2 KB.
-_RECV_BUF_SZ = const(32 * 1024)
+# v6.bvg.transport.rest sends up to about 21 KB, vbb.a6n.de up to 3.5 KB
+# (busy stations, 2026); the rest is room for more remarks or results
+_RECV_BUF_SZ = const(48 * 1024)
 
 _FRAME_RATE = const(30)
 # S-PWM panels: refresh at _SPWM_SYNC * _FRAME_RATE, each frame is shown for
@@ -787,7 +788,7 @@ def render_row(i, eta, line, line_size, typ, dest, bg_col, line_width, force, co
     if dest != states[_S_DEST] or force:
         with locks[_S_DEST]:
             clear_cols(tl_buf, _TEXT_BUF_SZ // 8, _ETA_WIDTH + line_width, _TEXT_BUF_SZ - _ETA_WIDTH - line_width)
-            states[_S_DEST_SZ] = render_text(dest + _separator, tl_buf, _ETA_WIDTH + line_width, clip=_TEXT_BUF_SZ - _ETA_WIDTH - line_width, kerning=True) - _separator_sz
+            states[_S_DEST_SZ] = render_text(dest + _separator, tl_buf, _ETA_WIDTH + line_width, clip=_TEXT_BUF_SZ, kerning=True) - _separator_sz
             states[_S_DEST] = dest
             # reset now, so the display thread never combines the
             # new dest size with the old scroll offset; render_task
