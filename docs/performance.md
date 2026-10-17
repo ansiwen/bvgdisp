@@ -101,9 +101,26 @@ ETA, LINE, DEST and a scrolling DEST.
 
 The viper wrapper in front of `blit_asm()` adds an estimated 300-600
 instructions per call (global lookups, an exception frame, the call). That
-part runs in the C runtime and wasn't emulated. Frame times on the device
-were not measured yet: `display_thread` has a commented-out `elapsed`
-print for that.
+part runs in the C runtime and wasn't emulated.
+
+**Frame timing on the device** (RP2350, 128x64 S-PWM panel, 7 rows,
+2026-10), measured with `_FRAME_STATS = const(True)`. That prints averages
+and maxima over 300 frames on the USB serial console every 10 s:
+
+| | avg | max |
+|---|---|---|
+| clearing the frame buffer | 0.49 ms | 0.7 ms (once 1.0) |
+| drawing (frame logic and all `blit()`s) | 0.9-1.0 ms | 1.5 ms |
+| `_h75.update()`, waiting for the panel refresh | 31.9 ms | 33.5-35.3 ms |
+| frame period | 33.33 ms | 34.8-36.7 ms |
+
+So the display thread works about 1.4 ms of the 33.3 ms frame, and making
+`blit()` faster would gain nothing visible. In every 10 s window, at least
+one frame came 1.5-3.4 ms late, because `update()` returned late, not
+because of drawing. Probably that's core 0 (fetch, JSON parsing, GC)
+competing for flash and RAM. With S-PWM, such a frame is shown for one
+extra refresh. There is no measurement of the code before these changes
+to compare with.
 
 **API responses** (14 results, busy stations, 2026-10):
 
