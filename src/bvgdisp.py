@@ -1005,7 +1005,8 @@ async def data_fetch_task():
               "ms,", n - hdr_end - 4, "bytes")
 
         _dep_data = parse_departures(data["departures"], settings.get("FILTERED"))
-        warn_msg = pick_warning(data["warnings"], time.time())
+        # only some APIs send warnings, eg. v6.bvg.transport.rest doesn't
+        warn_msg = pick_warning(data.get("warnings") or (), time.time())
         # compare by text, not id: the id can change while the
         # text stays the same (duplicate warnings), or vice versa
         set_warn_msg(warn_msg)
