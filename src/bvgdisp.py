@@ -5,8 +5,8 @@ import network
 import asyncio
 import aiohttp
 import hub75
-from picographics import PicoGraphics, DISPLAY_GENERIC, PEN_RGB888
-from font_bvg import font_small
+import picographics
+import font_bvg
 import settings
 import hw_conf
 import gc
@@ -68,12 +68,13 @@ _wlan = network.WLAN(network.STA_IF)
 # Setup for the display
 
 def make_textbuf(sz):
-    buf = PicoGraphics(width=sz, height=8, display=DISPLAY_GENERIC, pen_type=PEN_RGB888)
+    buf = picographics.PicoGraphics(width=sz, height=8, display=picographics.DISPLAY_GENERIC,
+                                    pen_type=picographics.PEN_RGB888)
     buf.set_pen(0)
     buf.clear()
     return (buf, memoryview(buf))
 
-_disp = PicoGraphics(display=hw_conf.DISPLAY)
+_disp = picographics.PicoGraphics(display=hw_conf.DISPLAY)
 _disp_mv = memoryview(_disp)
 _disp.set_pen(0)
 _disp.clear()
@@ -257,12 +258,13 @@ def banner():
     import assetfiles
     disp, disp_mv = _disp, _disp_mv
     pos_y = _disp_height // 2 - 16
-    img = PicoGraphics(width=128, height=64, display=DISPLAY_GENERIC, pen_type=PEN_RGB888)
+    img = picographics.PicoGraphics(width=128, height=64, display=picographics.DISPLAY_GENERIC,
+                                    pen_type=picographics.PEN_RGB888)
     img_mv = memoryview(img)
     png = pngdec.PNG(img)
     assetfiles.open_png(png, "assets/ansiwen128x64.png")
     png.decode(0, 0)
-    bvg = PicoGraphics(display=hw_conf.DISPLAY)
+    bvg = picographics.PicoGraphics(display=hw_conf.DISPLAY)
     bvg_mv = memoryview(bvg)
     png2 = pngdec.PNG(bvg)
     assetfiles.open_png(png2, "assets/bvgdisp_logo.png")
@@ -341,7 +343,7 @@ def render_text(s, disp=None, x=0, y=0, bold=False, clip=None, kerning=False):
         else:
             clip = 0xffff
     cursor_x = x
-    font = font_small
+    font = font_bvg.font_small
     height = font["fontheight"]
     last_col = 0
     for char in s:

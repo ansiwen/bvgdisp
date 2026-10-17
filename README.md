@@ -92,16 +92,16 @@ The first build fetches the pinned MicroPython, Interstate 75 board and pimoroni
 Edit `hw_conf.py` to match your display:
 
 ```python
-from hub75 import COLOR_ORDER_RGB, COLOR_ORDER_RBG
-from picographics import DISPLAY_INTERSTATE75_128X32, DISPLAY_INTERSTATE75_128X64
+import hub75
+import picographics
 
 # Select your display size
-DISPLAY = DISPLAY_INTERSTATE75_128X32
-# DISPLAY = DISPLAY_INTERSTATE75_128X64
+DISPLAY = picographics.DISPLAY_INTERSTATE75_128X32
+# DISPLAY = picographics.DISPLAY_INTERSTATE75_128X64
 
 # Adjust if colors appear wrong (RGB vs RBG panels)
-COLOR_ORDER = COLOR_ORDER_RGB
-# COLOR_ORDER = COLOR_ORDER_RBG
+COLOR_ORDER = hub75.COLOR_ORDER_RGB
+# COLOR_ORDER = hub75.COLOR_ORDER_RBG
 ```
 
 Available display options:
