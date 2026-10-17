@@ -639,6 +639,10 @@ _empty_states = ["", "", "", 0, 0, False]
 _ETA_STRS_N = const(100)
 _eta_strs = tuple(str(n) + "'" for n in range(_ETA_STRS_N))
 
+# render_row() and clear_row() are native: as bytecode, their frames are
+# too big for the C stack (over 11 words), so every call would allocate
+# them on the heap, which can trigger a gc.collect() on a full heap
+@micropython.native
 def render_row(i, eta_s, blinking, line, line_size, typ, dest, bg_col, line_width, force, colored, sub_colors):
     """Redraw the changed columns of text row i, each under its own lock.
     line_size is the width of the line name. Returns whether DEST was
@@ -690,6 +694,7 @@ def render_row(i, eta_s, blinking, line, line_size, typ, dest, bg_col, line_widt
         return True
     return False
 
+@micropython.native
 def clear_row(i):
     """Blank text row i, unless it is blank already."""
     tl_buf, _, locks, states = _textlines[i]
