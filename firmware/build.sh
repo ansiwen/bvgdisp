@@ -10,7 +10,7 @@ set -e
 # Pinned dependencies: update them deliberately, not by accident
 MICROPYTHON=pimoroni/micropython@725235d49042b9c6687588d9fea0b49bdea2755d     # cyw43-dynamic-pins, v1.29.0
 INTERSTATE75=pimoroni/interstate75@c84cdf4dc637bb98afc6806b2bde115ee09562dd   # i75w_rp2350 board
-PIMORONI_PICO=ansiwen/pimoroni-pico@690f37067397e2d39635da70ed766ef6e07a2e1a  # hub75-spwm: Hub75SPWM
+PIMORONI_PICO=ansiwen/pimoroni-pico@hub75-spwm  # hub75-spwm: Hub75SPWM
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$HERE/../src
