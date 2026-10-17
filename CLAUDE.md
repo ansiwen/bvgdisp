@@ -4,7 +4,7 @@ BVG (Berlin transit) departure display: a Raspberry Pi Pico W / Pico 2 W (usuall
 
 ## Runtime environment
 
-- **Pimoroni MicroPython**, not CPython or stock MicroPython. It depends on the firmware-provided `hub75`, `picographics`, `pngdec`, plus `machine`, `network`, `_thread`, and `micropython` (`const`, `@micropython.native`, `@micropython.viper`). None of this runs on a desktop, and there are no tests.
+- **Pimoroni MicroPython**, not CPython or stock MicroPython. It depends on the firmware-provided `hub75`, `picographics`, `pngdec`, plus `machine`, `network`, `_thread`, and `micropython` (`const`, `@micropython.native`, `@micropython.viper`). None of this runs on a desktop as is, and there are no tests in the repo. `docs/performance.md` describes how changes were checked without the device: the unix port with stubbed hardware, generated-code inspection, and an ARM emulator.
 - `src/` is the device's filesystem root. The MicroPico VS Code extension syncs it (`micropico.syncFolder: "src"`), or you can copy it with `mpremote cp -r src :`. On boot, the device runs `main.py`.
 - `typings/` holds MicroPython/Pimoroni stubs, used only by Pylance. Don't edit them.
 - Settings persist in `/settings.json` on the device, not in the repo.
@@ -51,6 +51,7 @@ Boot and network: without an SSID, or when connecting fails, the device starts a
 ## Conventions and gotchas
 
 - Priorities, in this order: 1. performance, but only at hot spots (`display_thread`, `blit()`, and what the render task does every second); 2. GC pressure: no garbage in steady state, and big buffers allocated once at startup; 3. total RAM usage. The firmware with everything frozen in is what counts, so eg. native code costs flash, not RAM.
+- `docs/performance.md` has the MicroPython facts this code relies on (what allocates, what stays in flash, how viper and asm_thumb compile), the measurements behind the buffer sizes and `blit()`, and the alternatives that were rejected. Read it before optimizing.
 - Code is tuned for speed on the MCU. Module constants use `const()` with a leading underscore, which makes them compile-time and keeps them out of the module dict. Hot functions copy globals into locals and use `@micropython.native`/`viper`. Keep these patterns when you edit hot paths, and avoid allocating inside `display_thread`.
 - `blit()` has no bounds checks, so callers are responsible for offsets and lengths; see its docstring. Its inner loop is `blit_asm()`, `@micropython.asm_thumb` with only Thumb-1 instructions, so the same code runs on the RP2040 and the RP2350. The unix port can't run it: check changes to it in an emulator or on both MCUs.
 - `time.ticks_ms()` wraps at 2³⁰ ms (about 12.4 days) on rp2. Never compare or add ticks with `>`/`+`. Always use `time.ticks_diff()`/`time.ticks_add()`.

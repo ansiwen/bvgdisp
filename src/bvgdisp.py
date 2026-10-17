@@ -16,7 +16,9 @@ import crashlog
 _ETA_WIDTH = const(11)
 _COL_GAP = const(3)
 
-# widths in pixels of the 1-bit text buffers, multiples of 32, see blit()
+# widths in pixels of the 1-bit text buffers, multiples of 32, see blit().
+# The longest destination seen was 180 px, the longest warning 1372 px; the
+# ticker shows for _WARN_DURATION_MS at 1 px per frame, about 1350 px.
 _TEXT_BUF_SZ = const(512)
 _WARN_BUF_SZ = const(4096)
 # a whole HTTP response, headers included. With the default 14 results,
