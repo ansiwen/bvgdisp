@@ -632,25 +632,23 @@ def asyncio_exception_handler(loop, context):
         return
     crashlog.log_exception("task " + str(context.get("future")), e)
 
-# states of a textline that is blank
-_empty_states = ["", "", "", 0, 0, False]
-
-# the ETA texts, so that render_task doesn't build them every second
-_ETA_STRS_N = const(100)
-_eta_strs = tuple(str(n) + "'" for n in range(_ETA_STRS_N))
+# states of a textline that is blank. The ETA is kept in minutes, as an
+# int, so that its text is only built when it changes.
+_empty_states = [None, "", "", 0, 0, False]
 
 # render_row() and clear_row() are native: as bytecode, their frames are
 # too big for the C stack (over 11 words), so every call would allocate
 # them on the heap, which can trigger a gc.collect() on a full heap
 @micropython.native
-def render_row(i, eta_s, blinking, line, line_size, typ, dest, bg_col, line_width, force, colored, sub_colors):
+def render_row(i, eta, line, line_size, typ, dest, bg_col, line_width, force, colored, sub_colors):
     """Redraw the changed columns of text row i, each under its own lock.
-    line_size is the width of the line name. Returns whether DEST was
-    redrawn."""
+    eta is in minutes, 0 for "now" (blinking, without text). line_size is
+    the width of the line name. Returns whether DEST was redrawn."""
     tl_buf, _, locks, states = _textlines[i]
 
     # render ETA at beginning of textline buffer
-    if eta_s != states[_S_ETA] or force:
+    if eta != states[_S_ETA] or force:
+        eta_s = "%d'" % eta if eta else ""
         eta_size = render_text(eta_s)
         with locks[_S_ETA]:
             tl_buf.set_pen(_BG)
@@ -658,9 +656,9 @@ def render_row(i, eta_s, blinking, line, line_size, typ, dest, bg_col, line_widt
             if eta_s:
                 set_pen(tl_buf, _BVG)
                 render_text(eta_s, tl_buf, _ETA_WIDTH - eta_size + 1, 0, clip=_ETA_WIDTH)
-            states[_S_ETA] = eta_s
-            states[_S_BLINKING] = blinking
-            print(f"updated ETA of line {i}")
+            states[_S_ETA] = eta
+            states[_S_BLINKING] = not eta
+            print("updated ETA of line", i)
 
     # then render LINE
     if line != states[_S_LINE] or force:
@@ -676,7 +674,7 @@ def render_row(i, eta_s, blinking, line, line_size, typ, dest, bg_col, line_widt
                 set_pen(tl_buf, _BVG)
             render_text(line, tl_buf, _ETA_WIDTH + line_offset, 0, bold=True, clip=_ETA_WIDTH+line_width, kerning=True)
             states[_S_LINE] = line
-            print(f"updated LINE of line {i}")
+            print("updated LINE of line", i)
 
     # last is DEST, because it has flexible length
     if dest != states[_S_DEST] or force:
@@ -690,7 +688,7 @@ def render_row(i, eta_s, blinking, line, line_size, typ, dest, bg_col, line_widt
             # new dest size with the old scroll offset; render_task
             # resets all updated rows again to scroll in sync
             states[_S_DEST_X] = _DEST_SCROLL_INIT
-            print(f"updated DEST of line {i}")
+            print("updated DEST of line", i)
         return True
     return False
 
@@ -763,19 +761,11 @@ async def render_task():
                 if eta_n < walk_delay:
                     continue
 
-                eta_n //= 60
-
-                blinking = False
-                if eta_n < 1:
-                    eta_s = ""
-                    blinking = True
-                elif eta_n < _ETA_STRS_N:
-                    eta_s = _eta_strs[eta_n]
-                else:
-                    eta_s = str(eta_n) + "'"
+                # 0 is "now"; below that only with a negative WALK_DELAY
+                eta_n = max(eta_n // 60, 0)
 
                 line_size = render_text(line, bold=True, kerning=True)
-                if render_row(i, eta_s, blinking, line, line_size, typ, dest,
+                if render_row(i, eta_n, line, line_size, typ, dest,
                               bg_col, line_width, force_update, colored, sub_colors):
                     dest_redrawn |= 1 << i
                 line_size_max = max(line_size_max, line_size)
