@@ -1,3 +1,6 @@
 firmware/.deps/
 firmware/build/
 firmware/dist/
+tools/.deps/
+tools/out/
+__pycache__/

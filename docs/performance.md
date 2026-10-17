@@ -21,7 +21,7 @@ Memory:
   `@micropython.native`, whose frames are always on the C stack. `mpy-tool.py
   -d` prints a function's frame size as the first number of its `prelude`.
 - **Frozen native, viper and asm code stays in flash** (`static const`
-  arrays in `.text`, `tools/mpy-tool.py`), so it costs no RAM. From a `.py`
+  arrays in `.text`, MicroPython's `tools/mpy-tool.py`), so it costs no RAM. From a `.py`
   file on the device it is compiled into RAM, once at import.
 - **Frozen `bytes` and `str` constants stay in flash.** That's why the font
   is generated as `bytes` tables (`font/mkfont.py`). Dict and list literals
@@ -130,16 +130,17 @@ since then cost about 18 KB of it.
 
 ## How to check changes without the device
 
-None of this is in the repo; it was set up in a scratch directory.
+`tools/` has these checks ready to run, see `tools/README.md`. How they work:
 
 1. **Build the pinned MicroPython**: the commit from `firmware/build.sh`,
    then `make -C mpy-cross` and `make -C ports/unix`. The unix port runs
    native and viper code, but not `asm_thumb`.
 2. **Inspect generated code**:
    - `mpy-cross -march=armv7emsp` (RP2350) or `-march=armv6m` (RP2040),
-     then `tools/mpy-tool.py -f -q <qstrdefs> file.mpy` writes C with each
+     then MicroPython's `tools/mpy-tool.py -f -q <qstrdefs> file.mpy` writes C with each
      function's machine code as a `fun_data_*` byte array;
-   - functions are named after the file when they're native, viper or asm;
+   - native functions keep their names, viper and asm ones are named after
+     the file, in source order (`tools/mpycode.py` maps them back);
    - wrap the bytes in `.byte` directives, assemble with
      `llvm-mc -triple=thumbv8m.main-none-eabi -mcpu=cortex-m33`, and
      disassemble with `llvm-objdump -d`.

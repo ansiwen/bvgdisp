@@ -4,7 +4,7 @@ BVG (Berlin transit) departure display: a Raspberry Pi Pico W / Pico 2 W (usuall
 
 ## Runtime environment
 
-- **Pimoroni MicroPython**, not CPython or stock MicroPython. It depends on the firmware-provided `hub75`, `picographics`, `pngdec`, plus `machine`, `network`, `_thread`, and `micropython` (`const`, `@micropython.native`, `@micropython.viper`). None of this runs on a desktop as is, and there are no tests in the repo. `docs/performance.md` describes how changes were checked without the device: the unix port with stubbed hardware, generated-code inspection, and an ARM emulator.
+- **Pimoroni MicroPython**, not CPython or stock MicroPython. It depends on the firmware-provided `hub75`, `picographics`, `pngdec`, plus `machine`, `network`, `_thread`, and `micropython` (`const`, `@micropython.native`, `@micropython.viper`). None of this runs on a desktop as is, and there are no unit tests. `tools/` has checks that run the code on the desktop instead: the display frame by frame in the MicroPython unix port with stubbed hardware (`tools/compare_frames.sh`), the assembler in an ARM emulator, and the generated machine code. See `tools/README.md`; `tools/setup.sh` builds what they need.
 - `src/` is the device's filesystem root. The MicroPico VS Code extension syncs it (`micropico.syncFolder: "src"`), or you can copy it with `mpremote cp -r src :`. On boot, the device runs `main.py`.
 - `typings/` holds MicroPython/Pimoroni stubs, used only by Pylance. Don't edit them.
 - Settings persist in `/settings.json` on the device, not in the repo.
