@@ -117,6 +117,14 @@ PANEL = hub75.PANEL_SM16380SH
 # SPWM_PROFILE = hub75.SM16380SH_REG8   # optional, the default is SM16380SH_REG2
 ```
 
+Panels that aren't 1/32 scan with two halves also need their wiring, eg. a P2.5 128x64 1/64 scan panel with FM6373D drivers and a 6258K row driver:
+
+```python
+PANEL = hub75.PANEL_FM6373
+SPWM_LANES = hub75.LANES_SINGLE                 # only R0, G0, B0
+SPWM_ROW_DRIVER = hub75.ROWS_SHIFT_REGISTER     # the row driver is a shift register
+```
+
 ### Initial Setup (Access Point Mode)
 
 On first boot (or if WiFi credentials are not configured):
@@ -178,7 +186,7 @@ WiFi connection failed after multiple attempts. Check your SSID and password in 
 Change `COLOR_ORDER` in `hw_conf.py` between `COLOR_ORDER_RGB` and `COLOR_ORDER_RBG`.
 
 ### Noise or ghosting on an S-PWM panel
-The chip registers don't suit your panel. Try another `SPWM_PROFILE` in `hw_conf.py`, eg. `hub75.SM16380SH_REG2` (the default) or `hub75.SM16380SH_REG1` (darker). On a P2.5 128x64 SM16380SH panel, REG7, REG32 and REG34 showed ghosting, and REG8 can show noise in large bright areas.
+The chip registers don't suit your panel. Try another `SPWM_PROFILE` in `hw_conf.py`, eg. `hub75.SM16380SH_REG2` (the default) or `hub75.SM16380SH_REG1` (darker). On a P2.5 128x64 SM16380SH panel, REG7, REG32 and REG34 showed ghosting, and REG8 can show noise in large bright areas. On the FM6373D panel above, only `hub75.FM6373_REG6`, the default, showed no ghosting.
 
 ### No departures shown
 - Check that your Station ID is correct

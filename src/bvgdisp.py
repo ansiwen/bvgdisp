@@ -98,11 +98,15 @@ _row_height = 9 if _disp_height == 64 else 8
 _n_textlines = (_disp_height - _row_y0) // _row_height
 
 # hw_conf.PANEL selects a panel with S-PWM driver chips, eg. hub75.PANEL_SM16380SH,
-# and the optional hw_conf.SPWM_PROFILE its registers, eg. hub75.SM16380SH_REG8
+# the optional hw_conf.SPWM_PROFILE its registers, eg. hub75.SM16380SH_REG8, and
+# the optional SPWM_LANES and SPWM_ROW_DRIVER its wiring (only passed if set, so
+# older firmware without them still works)
 _spwm = hasattr(hw_conf, "PANEL")
 if _spwm:
     _h75 = hub75.Hub75SPWM(_disp_width, _disp_height, panel_type=hw_conf.PANEL,
-                           color_order=hw_conf.COLOR_ORDER)
+                           color_order=hw_conf.COLOR_ORDER,
+                           **{k: getattr(hw_conf, a) for k, a in (("lanes", "SPWM_LANES"), ("row_driver", "SPWM_ROW_DRIVER"))
+                              if hasattr(hw_conf, a)})
     _h75.set_refresh_rate(_SPWM_SYNC * _FRAME_RATE)
     if hasattr(hw_conf, "SPWM_PROFILE"):
         _h75.set_config_registers(hw_conf.SPWM_PROFILE)
