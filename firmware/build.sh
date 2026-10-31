@@ -42,15 +42,24 @@ python3 "$HERE/mkassets.py" "$BUILD/frozen_assets.py" "$SRC" assets
 make -C "$DEPS/micropython/mpy-cross" -j "$JOBS" >/dev/null
 
 BOARD=$DEPS/interstate75/boards/i75w_rp2350
+# The board only has these as C macros in its mpconfigboard.h (flash storage
+# = flash size - 2 MB), but the linker script needs them as symbols. Keep them
+# in sync with the header; without them the linker's firmware/filesystem
+# overlap check is off. The flash size also works around old ld versions
+# (eg. Homebrew's 10.3) that can't parse the header's "(4 * 1024 * 1024)".
+FLASH_SIZE=$((4 * 1024 * 1024))
+FLASH_STORAGE=$((FLASH_SIZE - 2 * 1024 * 1024))
 # Shown in the REPL banner
 export MICROPY_GIT_TAG="bvgdisp $(git -C "$HERE" describe --always --dirty 2>/dev/null || echo unknown)"
 export MICROPY_GIT_HASH="$MICROPY_GIT_TAG"
-cmake -S "$DEPS/micropython/ports/rp2" -B "$BUILD/rp2" \
+cmake -Wno-dev -S "$DEPS/micropython/ports/rp2" -B "$BUILD/rp2" \
     -DMICROPY_BOARD=i75w_rp2350 \
     -DMICROPY_BOARD_DIR="$BOARD" \
     -DUSER_C_MODULES="$BOARD/usermodules.cmake" \
     -DPIMORONI_PICO_PATH="$DEPS/pimoroni-pico" \
     -DMICROPY_FROZEN_MANIFEST="$HERE/manifest.py" \
+    -DPICO_FLASH_SIZE_BYTES=$FLASH_SIZE \
+    -DCMAKE_EXE_LINKER_FLAGS=-Wl,--defsym=__micropy_flash_storage_bytes__=$FLASH_STORAGE \
     -DPICO_BUILD_DOCS=0 \
     -DPICO_NO_COPRO_DIS=1
 cmake --build "$BUILD/rp2" -j "$JOBS"
