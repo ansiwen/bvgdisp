@@ -70,6 +70,26 @@ _ETA_ROUND_S = const(45)
 # to keep the device stopped at the REPL after the backtrace.
 _RESET_ON_CRASH = const(True)
 
+# Watchdog: each routine stores ticks_ms() in _beats[_B_*] as it goes round
+# its loop. watchdog_task() resets the device when one is older than its
+# limit, and the hardware WDT resets it when watchdog_task itself (or the
+# whole event loop) stops. Only active with _RESET_ON_CRASH, as a WDT can't
+# be stopped again and would reset the device under the REPL.
+_WDT_MS = const(8000)  # hardware timeout, at most 8388 on rp2
+# WATCHDOG_BASE of the pico-sdk, and the ENABLE bit of its CTRL register
+_WATCHDOG_BASE_RP2040 = const(0x40058000)
+_WATCHDOG_BASE_RP2350 = const(0x400d8000)
+_WATCHDOG_BASE = _WATCHDOG_BASE_RP2350
+_WATCHDOG_CTRL_ENABLE = const(1 << 30)
+_B_DISP = const(0)
+_B_RENDER = const(1)
+_B_FETCH = const(2)
+_B_NIGHT = const(3)
+_BEAT_NAMES = ("display", "render", "fetch", "night time")
+# longest legit gap: a display frame; a render cycle; waiting for the render
+# cycle + gc + _FETCH_TIMEOUT + _FETCH_DELAY; the sleep to the next minute
+_BEAT_LIMITS_MS = (5000, 10000, 40000, 100000)
+
 _rtc = machine.RTC()
 
 # Enable the Wireless
@@ -132,6 +152,7 @@ _disp_thread_crash = None  # backtrace text, written to flash by core 0
 # with _FRAME_STATS: reports count, then average and maximum in us of
 # clearing, drawing, update() and the frame period, set by display_thread
 _frame_stats = [0] * 9
+_beats = [0] * 4  # ticks_ms() of each routine's last heartbeat, 0: not started
 
 @micropython.native
 def make_pen(color):
@@ -658,7 +679,9 @@ def display_thread():
         blink_hide = False
         dest_off = 0
         disp.set_pen(0)
+        beats = _beats
         while not _disp_thread_stop:
+            beats[_B_DISP] = ticks_ms()
             if _FRAME_STATS:
                 t_frame = ticks_us()
             n = n_textlines
@@ -887,6 +910,7 @@ async def render_task():
     print("waiting for first data")
     console("waiting for data...")
     while _dep_data == None:
+        _beats[_B_RENDER] = time.ticks_ms()
         await asyncio.sleep_ms(100)
     _thread.start_new_thread(display_thread, ())
     _safe_to_fetch.clear()
@@ -895,6 +919,7 @@ async def render_task():
     dim = 10
     stats_seen = 0
     while True:
+        _beats[_B_RENDER] = time.ticks_ms()
         if _disp_thread_crash:
             write_disp_thread_crash()
         if _FRAME_STATS and _frame_stats[0] != stats_seen:
@@ -1187,6 +1212,7 @@ async def data_fetch_task():
     request = None
     request_version = -1  # the settings.version() request was made for
     while True:
+        _beats[_B_FETCH] = time.ticks_ms()
         try:
             await _safe_to_fetch.wait()
             gc.collect()
@@ -1215,8 +1241,10 @@ async def check_night_time_task():
     """Check if current time is within night hours"""
     global _dimming, _pen_bvg
     while not _time_set:
+        _beats[_B_NIGHT] = time.ticks_ms()
         await asyncio.sleep(1)
     while True:
+        _beats[_B_NIGHT] = time.ticks_ms()
         if __debug__:
             print("check_night_time")
         now = _rtc.datetime()
@@ -1257,6 +1285,23 @@ async def check_night_time_task():
         # wake up at the next second 55 that is at least 26 s away
         await asyncio.sleep(85 - (now[6] + 30) % 60)
 
+async def watchdog_task():
+    """Feeds the hardware WDT while all routines are alive."""
+    print("watchdog task started")
+    wdt = machine.WDT(timeout=_WDT_MS)
+    while True:
+        now = time.ticks_ms()
+        for i in range(len(_beats)):
+            beat = _beats[i]
+            if beat and time.ticks_diff(now, beat) > _BEAT_LIMITS_MS[i]:
+                text = "=== uptime %ds: watchdog, %s stuck for %d ms\n" % (
+                    now // 1000, _BEAT_NAMES[i], time.ticks_diff(now, beat))
+                print(text)
+                crashlog.write(text)
+                machine.reset()
+        wdt.feed()
+        await asyncio.sleep(1)
+
 # Main entry point
 async def main():
     from web_server import start_web_server
@@ -1284,7 +1329,10 @@ async def main():
         fetcher = asyncio.create_task(data_fetch_task())
         renderer = asyncio.create_task(render_task())
         night_time_checker = asyncio.create_task(check_night_time_task())
-        await asyncio.gather(fetcher, renderer, night_time_checker)
+        tasks = [fetcher, renderer, night_time_checker]
+        if _RESET_ON_CRASH:
+            tasks.append(asyncio.create_task(watchdog_task()))
+        await asyncio.gather(*tasks)
 
     web_server.close()
 
@@ -1326,3 +1374,7 @@ finally:
     if _crashed and _RESET_ON_CRASH:
         print("resetting")
         machine.reset()
+    # a started WDT would reset the board under the REPL or during a file
+    # sync, and machine.WDT can't stop it: clear the ENABLE bit of CTRL
+    import os
+    machine.mem32[_WATCHDOG_BASE] &= ~_WATCHDOG_CTRL_ENABLE

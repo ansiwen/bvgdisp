@@ -29,10 +29,11 @@ BVG (Berlin transit) departure display: a Raspberry Pi Pico W / Pico 2 W (usuall
 
 Two cores, with a strict split:
 
-1. **Core 0, asyncio**: three tasks in `main()`:
+1. **Core 0, asyncio**: four tasks in `main()`:
    - `data_fetch_task`: every few seconds, fetches `GET {API_URL}/stops/{STATION_ID}/departures`, sets the RTC from the HTTP `Date` header, and publishes the departures as `_dep_data`. It picks the most important currently valid warning for the ticker. The first response only sets the clock, so data arrives with the second.
    - `render_task`: once per second, renders the changed ETA/LINE/DEST text into per-row **off-screen text buffers**. It starts the display thread after the first data arrives.
    - `check_night_time_task`: sets `_dimming` (0–10) from `NIGHT_START`/`NIGHT_END`/`TIMEZONE`. The RTC runs in UTC, and `TIMEZONE` is a plain hour offset with no DST handling.
+   - `watchdog_task`: feeds the hardware WDT only while every routine (these three and `display_thread`) has stored a recent `ticks_ms()` in `_beats[_B_*]`, otherwise it logs the stuck routine to `/crash.log` and resets. **A new loop in a routine needs a heartbeat** and a limit in `_BEAT_LIMITS_MS`. It only runs with `_RESET_ON_CRASH`; on a non-crash exit the code at the end of `bvgdisp.py` clears the WDT's ENABLE bit so the REPL and file syncs survive.
 2. **Core 1, `display_thread`**: runs at `_FRAME_RATE` (30 fps), composes each frame by `blit()`ing regions of the text buffers into the framebuffer, and calls `_h75.update()`. It also does destination scrolling, blinking for "now" departures, and the warning ticker that takes over the bottom row from time to time. With `Hub75` it busy-waits for the frame time, which is deliberate, to avoid flicker. With `Hub75SPWM`, `update()` waits for the panel's refresh instead, which runs at `_SPWM_SYNC * _FRAME_RATE`.
 
 Data structures and sync:
