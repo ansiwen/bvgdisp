@@ -144,7 +144,7 @@ Settings available:
 - **API URL** - BVG REST API endpoint (default: `https://v6.bvg.transport.rest`)
 - **Station Search** - Search and select your departure station
 - **Filtered Lines** - Hide specific lines (e.g., U5, S8)
-- **Walk Delay** - Time in seconds to walk to the station (hides departures you can't catch)
+- **Walk Delay** - Time in minutes to walk to the station (hides departures you can't catch)
 - **Destination Offset** - Pixel offset for destination text alignment
 - **Transport Types** - Enable/disable Bus, Tram, U-Bahn, S-Bahn, Regional, Express, Ferry
 - **Colored Display** - Show transport type colors

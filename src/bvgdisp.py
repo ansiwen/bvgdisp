@@ -930,7 +930,7 @@ async def render_task():
         try:
             data = _dep_data
             now = time.time()
-            walk_delay = settings.get("WALK_DELAY")
+            walk_delay = settings.get("WALK_DELAY") * 60
             new_colored = settings.get("COLORED")
             new_sub_colors = settings.get("SUBWAY_COLORS")
             force_update = (new_colored != colored or new_sub_colors != sub_colors
@@ -1222,7 +1222,7 @@ async def data_fetch_task():
                 request_version = settings.version()
             when = None
             if _time_set:
-                when = time.time() + int(settings.get("WALK_DELAY"))
+                when = time.time() + int(settings.get("WALK_DELAY")) * 60
             # http_get() has no timeout: without this, a server or link that
             # stops responding mid-request would hang the fetch task forever
             if await asyncio.wait_for(fetch(request, when), _FETCH_TIMEOUT):
